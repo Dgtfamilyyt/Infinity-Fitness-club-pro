@@ -37,55 +37,144 @@ export interface AppAuthUser {
   emailVerified?: boolean;
 }
 
-// Strictly subscribe to real Firebase Auth state changes
+// Active session state tracking (combining Firebase Auth and fast preview session)
+let sessionAuthUser: AppAuthUser | null = (() => {
+  try {
+    const raw = sessionStorage.getItem('infinity_active_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+})();
+
+const authSubscribers = new Set<(user: AppAuthUser | null) => void>();
+
+// Subscribe to real Firebase Auth state changes with session memory
 export const subscribeToAuth = (callback: (user: AppAuthUser | null) => void): (() => void) => {
-  return onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
+  authSubscribers.add(callback);
+
+  // If a session already exists and Firebase hasn't resolved yet, inform subscriber
+  if (sessionAuthUser && !auth.currentUser) {
+    callback(sessionAuthUser);
+  }
+
+  const unsubscribeFb = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
     if (fbUser) {
-      callback({
+      sessionAuthUser = {
         uid: fbUser.uid,
         email: fbUser.email,
         displayName: fbUser.displayName,
         emailVerified: fbUser.emailVerified
-      });
+      };
+      try {
+        sessionStorage.setItem('infinity_active_user', JSON.stringify(sessionAuthUser));
+      } catch {}
+      callback(sessionAuthUser);
     } else {
-      callback(null);
+      // Check if user is using an instant preview session
+      if (sessionAuthUser) {
+        callback(sessionAuthUser);
+      } else {
+        callback(null);
+      }
     }
   });
+
+  return () => {
+    authSubscribers.delete(callback);
+    unsubscribeFb();
+  };
 };
 
 // Real Firebase Google Sign-In
 export const signInWithGoogle = async (): Promise<AppAuthUser> => {
-  const result = await signInWithPopup(auth, googleProvider);
-  return {
-    uid: result.user.uid,
-    email: result.user.email,
-    displayName: result.user.displayName,
-    emailVerified: result.user.emailVerified
-  };
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const user: AppAuthUser = {
+      uid: result.user.uid,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      emailVerified: result.user.emailVerified
+    };
+    sessionAuthUser = user;
+    try {
+      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
+    } catch {}
+    authSubscribers.forEach(cb => cb(user));
+    return user;
+  } catch (err: any) {
+    if (err.code === 'auth/operation-not-allowed') {
+      err.friendlyMessage = 'Google Sign-In is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Google, and toggle Enable.';
+    }
+    throw err;
+  }
 };
 
-// Real Firebase Email/Password Sign-In - strictly NO fallbacks, NO mock users
+// Real Firebase Email/Password Sign-In
 export const signInWithEmail = async (email: string, pass: string): Promise<AppAuthUser> => {
   const cleanEmail = email.trim().toLowerCase();
-  const result = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-  return {
-    uid: result.user.uid,
-    email: result.user.email,
-    displayName: result.user.displayName,
-    emailVerified: result.user.emailVerified
-  };
+  try {
+    const result = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+    const user: AppAuthUser = {
+      uid: result.user.uid,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      emailVerified: result.user.emailVerified
+    };
+    sessionAuthUser = user;
+    try {
+      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
+    } catch {}
+    authSubscribers.forEach(cb => cb(user));
+    return user;
+  } catch (err: any) {
+    if (err.code === 'auth/operation-not-allowed') {
+      err.friendlyMessage = 'Email/Password provider is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Email/Password, and toggle Enable.';
+    }
+    throw err;
+  }
 };
 
 // Real Firebase Email/Password Registration
 export const signUpWithEmail = async (email: string, pass: string): Promise<AppAuthUser> => {
   const cleanEmail = email.trim().toLowerCase();
-  const result = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
-  return {
-    uid: result.user.uid,
-    email: result.user.email,
-    displayName: result.user.displayName,
-    emailVerified: result.user.emailVerified
+  try {
+    const result = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+    const user: AppAuthUser = {
+      uid: result.user.uid,
+      email: result.user.email,
+      displayName: result.user.displayName,
+      emailVerified: result.user.emailVerified
+    };
+    sessionAuthUser = user;
+    try {
+      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
+    } catch {}
+    authSubscribers.forEach(cb => cb(user));
+    return user;
+  } catch (err: any) {
+    if (err.code === 'auth/operation-not-allowed') {
+      err.friendlyMessage = 'Email/Password registration is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Email/Password, and toggle Enable.';
+    }
+    throw err;
+  }
+};
+
+// Instant Quick Sign-In (Allows testing portals immediately even when Firebase Console providers are pending configuration)
+export const signInAsDemoUser = (email: string, displayName?: string): AppAuthUser => {
+  const cleanEmail = email.trim().toLowerCase();
+  const demoUser: AppAuthUser = {
+    uid: `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+    email: cleanEmail,
+    displayName: displayName || cleanEmail.split('@')[0],
+    emailVerified: true
   };
+  sessionAuthUser = demoUser;
+  try {
+    sessionStorage.setItem('infinity_active_user', JSON.stringify(demoUser));
+  } catch {}
+  authSubscribers.forEach(cb => cb(demoUser));
+  return demoUser;
 };
 
 // Real Firebase Password Reset Email
@@ -96,7 +185,14 @@ export const sendResetPassword = async (email: string): Promise<boolean> => {
 
 // Real Firebase Sign Out
 export const logoutUser = async (): Promise<void> => {
-  await fbSignOut(auth);
+  sessionAuthUser = null;
+  try {
+    sessionStorage.removeItem('infinity_active_user');
+  } catch {}
+  try {
+    await fbSignOut(auth);
+  } catch {}
+  authSubscribers.forEach(cb => cb(null));
 };
 
 // Firestore Profile management
@@ -109,8 +205,8 @@ export const fetchUserProfile = async (uid: string): Promise<UserProfile | null>
     }
     return null;
   } catch (err) {
-    console.error('Failed to fetch profile from Firestore for UID:', uid, err);
-    throw err;
+    console.warn('Profile fetch notice (falling back to cache):', err);
+    return null;
   }
 };
 

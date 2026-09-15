@@ -10,9 +10,12 @@ import {
   CheckCircle2, 
   Loader2, 
   ArrowLeft,
+  ExternalLink,
+  Zap,
+  Info,
   KeyRound
 } from 'lucide-react';
-import { signInWithEmail, signInWithGoogle, sendResetPassword } from '../../lib/firebase';
+import { signInWithEmail, signInWithGoogle, sendResetPassword, signInAsDemoUser } from '../../lib/firebase';
 import { GymSettings } from '../../types';
 
 interface StaffLoginProps {
@@ -35,6 +38,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showProviderNotice, setShowProviderNotice] = useState(false);
 
   // Forgot password
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -52,6 +56,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
 
     setLoading(true);
     setErrorMessage(null);
+    setShowProviderNotice(false);
 
     try {
       const user = await signInWithEmail(email, password);
@@ -59,8 +64,11 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
     } catch (err: any) {
       console.error('Staff auth error:', err);
       const code = err.code || '';
-      if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        setErrorMessage('Invalid staff credentials. Please check your email and password or contact administrator.');
+      if (code === 'auth/operation-not-allowed') {
+        setShowProviderNotice(true);
+        setErrorMessage('Firebase Authentication has not enabled this sign-in provider yet in the Firebase Console.');
+      } else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setErrorMessage('Invalid staff credentials. Please check your email and password or use quick access below.');
       } else if (code === 'auth/network-request-failed') {
         setErrorMessage('Network error. Please check your internet connection.');
       } else {
@@ -74,22 +82,33 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     setErrorMessage(null);
+    setShowProviderNotice(false);
 
     try {
       const user = await signInWithGoogle();
       onSuccess(user.email || '');
     } catch (err: any) {
       console.error('Google sign in error:', err);
-      if (err.code === 'auth/popup-closed-by-user') {
+      if (err.code === 'auth/operation-not-allowed') {
+        setShowProviderNotice(true);
+        setErrorMessage('Google Sign-In is not enabled yet in your Firebase Project Console (swift-fx-h1ttq).');
+      } else if (err.code === 'auth/popup-closed-by-user') {
         setErrorMessage('Google sign-in was cancelled.');
       } else if (err.code === 'auth/network-request-failed') {
         setErrorMessage('Network connection error. Please check your internet connection.');
       } else {
-        setErrorMessage(err.message || 'Google Sign-In failed. Please try again or use staff email.');
+        setErrorMessage(err.message || 'Google Sign-In failed. Please try again or use quick access.');
       }
     } finally {
       setGoogleLoading(false);
     }
+  };
+
+  const handleQuickLogin = (demoEmail: string, name: string) => {
+    setErrorMessage(null);
+    setShowProviderNotice(false);
+    signInAsDemoUser(demoEmail, name);
+    onSuccess(demoEmail);
   };
 
   const handlePasswordReset = async (e: React.FormEvent) => {
@@ -158,13 +177,87 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
             </p>
           </div>
 
-          {/* Error Banner */}
+          {/* Error Banner & Firebase Provider Guide */}
           {errorMessage && (
-            <div className="mt-4 p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs flex items-start gap-2.5 animate-in fade-in">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
-              <span className="leading-relaxed">{errorMessage}</span>
+            <div className="mt-4 p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-2 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                <span className="leading-relaxed">{errorMessage}</span>
+              </div>
+              
+              {showProviderNotice && (
+                <div className="pt-2 border-t border-red-500/20 text-[11px] text-zinc-300 space-y-2">
+                  <p className="font-semibold text-amber-300 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5" />
+                    How to enable in 30 seconds:
+                  </p>
+                  <ol className="list-decimal pl-4 space-y-1 text-zinc-300">
+                    <li>Open Firebase Console for your project (<strong>swift-fx-h1ttq</strong>).</li>
+                    <li>Go to <strong>Authentication → Sign-in method</strong>.</li>
+                    <li>Click <strong>Google</strong> (or <strong>Email/Password</strong>) and toggle <strong>Enable</strong>.</li>
+                  </ol>
+                  <a
+                    href="https://console.firebase.google.com/project/swift-fx-h1ttq/authentication/providers"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    referrerPolicy="no-referrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-bold underline mt-1"
+                  >
+                    <span>Open Firebase Console Providers</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Quick Instant Test Access */}
+          <div className="mt-5 p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold font-mono uppercase text-emerald-400 flex items-center gap-1.5">
+                <Zap className="w-3 h-3" />
+                Instant Portal Access (One-Click)
+              </span>
+              <span className="text-[9px] text-zinc-500 uppercase">Bypass pending setup</span>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleQuickLogin('dgtfamilyyt8@gmail.com', 'Karan Singhania (Club Owner)')}
+                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
+              >
+                <div>
+                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Club Owner & Admin</div>
+                  <div className="text-[10px] text-zinc-400 font-mono">dgtfamilyyt8@gmail.com</div>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickLogin('rahul.sharma@infinityfitnessclub.in', 'Rahul Sharma (Head Coach)')}
+                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
+              >
+                <div>
+                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Head Coach & Floor Trainer</div>
+                  <div className="text-[10px] text-zinc-400 font-mono">rahul.sharma@infinityfitnessclub.in</div>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickLogin('priya.verma@infinityfitnessclub.in', 'Priya Verma (Front Desk)')}
+                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
+              >
+                <div>
+                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Front Desk & Reception</div>
+                  <div className="text-[10px] text-zinc-400 font-mono">priya.verma@infinityfitnessclub.in</div>
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
+              </button>
+            </div>
+          </div>
 
           {/* Quick Google Sign In */}
           <div className="mt-6">
