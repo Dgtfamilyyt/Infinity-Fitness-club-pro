@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Gym config & public CMS info
+    match /gyms/{gymId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Gym zones (capacities, occupancy)
+    match /gym_zones/{zoneId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Membership plans
+    match /membership_plans/{planId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // User profiles
+    match /profiles/{userId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Active gym sessions
+    match /active_gym_sessions/{sessionId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Attendance records
+    match /attendance_records/{recordId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Workout assignments
+    match /workout_assignments/{assignmentId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Progress and PRs
+    match /personal_records/{prId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+    
+    match /progress_records/{recId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Notifications
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Audit logs
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+  }
+}

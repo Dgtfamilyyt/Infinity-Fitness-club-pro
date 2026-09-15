@@ -1,0 +1,163 @@
+{
+  "entities": {
+    "gyms": {
+      "title": "Gyms",
+      "description": "Multi-branch ready gym configuration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "tagline": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "opening_hours": { "type": "string" },
+        "announcement": { "type": "string" },
+        "currency": { "type": "string" },
+        "timezone": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "profiles": {
+      "title": "Profiles",
+      "description": "User profiles linked to auth",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "full_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "trainer", "admin", "owner"] },
+        "member_id": { "type": "string" },
+        "qr_token": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRING_SOON", "EXPIRED", "FROZEN", "TRIAL"] },
+        "membership_plan_id": { "type": "string" },
+        "plan_name": { "type": "string" },
+        "membership_expiry": { "type": "string" },
+        "assigned_trainer_id": { "type": "string" },
+        "assigned_trainer_name": { "type": "string" },
+        "fitness_goal": { "type": "string" },
+        "experience": { "type": "string" },
+        "workout_frequency": { "type": "number" },
+        "preferred_time": { "type": "string" },
+        "restrictions": { "type": "string" },
+        "trainer_notes": { "type": "string" },
+        "attendance_streak": { "type": "number" },
+        "workout_streak": { "type": "number" }
+      },
+      "required": ["email", "role"]
+    },
+    "gym_zones": {
+      "title": "Gym Zones",
+      "description": "Gym floor workout zones and capacities",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "capacity": { "type": "number" },
+        "current_occupancy": { "type": "number" },
+        "associated_muscles": { "type": "array", "items": { "type": "string" } },
+        "equipment": { "type": "array", "items": { "type": "string" } },
+        "display_order": { "type": "number" },
+        "status": { "type": "string", "enum": ["AVAILABLE", "BUSY", "FULL"] }
+      },
+      "required": ["name", "capacity"]
+    },
+    "membership_plans": {
+      "title": "Membership Plans",
+      "description": "Configurable membership tiers",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "duration_months": { "type": "number" },
+        "price": { "type": "number" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "is_active": { "type": "boolean" },
+        "highlight": { "type": "boolean" },
+        "display_order": { "type": "number" }
+      },
+      "required": ["name", "price", "duration_months"]
+    },
+    "active_gym_sessions": {
+      "title": "Active Gym Sessions",
+      "description": "Real-time members currently inside gym",
+      "type": "object",
+      "properties": {
+        "member_id": { "type": "string" },
+        "member_name": { "type": "string" },
+        "arrival": { "type": "string" },
+        "workout_name": { "type": "string" },
+        "zone_id": { "type": "string" },
+        "zone_name": { "type": "string" },
+        "trainer_name": { "type": "string" },
+        "method": { "type": "string" }
+      },
+      "required": ["member_id", "arrival"]
+    },
+    "attendance_records": {
+      "title": "Attendance Records",
+      "description": "Historical attendance logs",
+      "type": "object",
+      "properties": {
+        "member_id": { "type": "string" },
+        "member_name": { "type": "string" },
+        "arrival": { "type": "string" },
+        "exit": { "type": "string" },
+        "duration_minutes": { "type": "number" },
+        "workout_name": { "type": "string" },
+        "zone_name": { "type": "string" },
+        "method": { "type": "string" }
+      },
+      "required": ["member_id", "arrival"]
+    },
+    "workout_assignments": {
+      "title": "Workout Assignments",
+      "description": "Daily workouts assigned to members",
+      "type": "object",
+      "properties": {
+        "member_id": { "type": "string" },
+        "date": { "type": "string" },
+        "title": { "type": "string" },
+        "target_muscles": { "type": "array", "items": { "type": "string" } },
+        "zone_name": { "type": "string" },
+        "exercises": { "type": "array" },
+        "completion_percentage": { "type": "number" },
+        "is_completed": { "type": "boolean" },
+        "is_override": { "type": "boolean" },
+        "override_reason": { "type": "string" }
+      },
+      "required": ["member_id", "date", "title"]
+    },
+    "payments": {
+      "title": "Payments",
+      "description": "Membership payment records",
+      "type": "object",
+      "properties": {
+        "member_id": { "type": "string" },
+        "member_name": { "type": "string" },
+        "plan_name": { "type": "string" },
+        "amount": { "type": "number" },
+        "payment_method": { "type": "string" },
+        "reference": { "type": "string" },
+        "date": { "type": "string" },
+        "recorded_by": { "type": "string" }
+      },
+      "required": ["member_id", "amount", "payment_method"]
+    },
+    "audit_logs": {
+      "title": "Audit Logs",
+      "description": "System and management security audit trail",
+      "type": "object",
+      "properties": {
+        "actor": { "type": "string" },
+        "action": { "type": "string" },
+        "target_entity": { "type": "string" },
+        "target_id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["actor", "action", "timestamp"]
+    }
+  }
+}

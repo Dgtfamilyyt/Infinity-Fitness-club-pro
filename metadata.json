@@ -1,0 +1,6 @@
+{
+  "name": "Infinity Fitness Club",
+  "description": "Smart gym ecosystem featuring member dashboard, staff portal, crowd-balanced workout assignments, live floor occupancy, and QR check-in.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
