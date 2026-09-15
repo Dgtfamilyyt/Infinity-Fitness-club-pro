@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { UserRole, UserProfile, MembershipPlan } from './types';
 import { dataService } from './services/dataService';
 import { 
@@ -276,6 +277,7 @@ export default function App() {
           <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
           <span>Verifying authentication & security permissions</span>
         </div>
+        <Analytics />
       </div>
     );
   }
@@ -313,6 +315,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        <Analytics />
       </div>
     );
   }
@@ -340,6 +343,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        <Analytics />
       </div>
     );
   }
@@ -373,6 +377,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        <Analytics />
       </div>
     );
   }
@@ -380,28 +385,34 @@ export default function App() {
   // 5. Dedicated Member Login Page
   if (route === 'MEMBER_LOGIN') {
     return (
-      <MemberLogin
-        settings={settings}
-        onSuccess={() => {
-          navigateTo('MEMBER_DASHBOARD');
-        }}
-        onNavigateHome={() => navigateTo('HOME')}
-        onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
-      />
+      <>
+        <MemberLogin
+          settings={settings}
+          onSuccess={() => {
+            navigateTo('MEMBER_DASHBOARD');
+          }}
+          onNavigateHome={() => navigateTo('HOME')}
+          onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
+        />
+        <Analytics />
+      </>
     );
   }
 
   // 6. Dedicated Staff Login Page
   if (route === 'STAFF_LOGIN') {
     return (
-      <StaffLogin
-        settings={settings}
-        onSuccess={() => {
-          navigateTo('STAFF_PORTAL');
-        }}
-        onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
-        onNavigateHome={() => navigateTo('HOME')}
-      />
+      <>
+        <StaffLogin
+          settings={settings}
+          onSuccess={() => {
+            navigateTo('STAFF_PORTAL');
+          }}
+          onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
+          onNavigateHome={() => navigateTo('HOME')}
+        />
+        <Analytics />
+      </>
     );
   }
 
@@ -410,12 +421,15 @@ export default function App() {
     // Unauthenticated staff redirect
     if (!currentUser) {
       return (
-        <StaffLogin
-          settings={settings}
-          onSuccess={() => navigateTo('STAFF_PORTAL')}
-          onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
-          onNavigateHome={() => navigateTo('HOME')}
-        />
+        <>
+          <StaffLogin
+            settings={settings}
+            onSuccess={() => navigateTo('STAFF_PORTAL')}
+            onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
+            onNavigateHome={() => navigateTo('HOME')}
+          />
+          <Analytics />
+        </>
       );
     }
 
@@ -444,6 +458,7 @@ export default function App() {
               </button>
             </div>
           </div>
+          <Analytics />
         </div>
       );
     }
@@ -503,6 +518,7 @@ export default function App() {
             </div>
           )
         )}
+        <Analytics />
       </StaffLayout>
     );
   }
@@ -511,25 +527,31 @@ export default function App() {
   if (route === 'MEMBER_DASHBOARD') {
     if (!currentUser) {
       return (
-        <MemberLogin
-          settings={settings}
-          onSuccess={() => navigateTo('MEMBER_DASHBOARD')}
-          onNavigateHome={() => navigateTo('HOME')}
-          onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
-        />
+        <>
+          <MemberLogin
+            settings={settings}
+            onSuccess={() => navigateTo('MEMBER_DASHBOARD')}
+            onNavigateHome={() => navigateTo('HOME')}
+            onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
+          />
+          <Analytics />
+        </>
       );
     }
 
     return (
-      <MemberDashboard
-        member={currentUser}
-        workout={workout}
-        zones={zones}
-        totalInside={activeSessions.length}
-        prs={prs}
-        attendanceLogs={attendanceLogs}
-        onLogout={handleLogout}
-      />
+      <>
+        <MemberDashboard
+          member={currentUser}
+          workout={workout}
+          zones={zones}
+          totalInside={activeSessions.length}
+          prs={prs}
+          attendanceLogs={attendanceLogs}
+          onLogout={handleLogout}
+        />
+        <Analytics />
+      </>
     );
   }
 
@@ -561,6 +583,7 @@ export default function App() {
           onStaffLoginClick={() => navigateTo('STAFF_LOGIN')}
         />
       </main>
+      <Analytics />
     </div>
   );
 }
