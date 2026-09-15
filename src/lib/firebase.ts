@@ -3,6 +3,8 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut as fbSignOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -20,15 +22,32 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile, UserRole } from '../types';
 
+// Detect whether running on Vercel production domain to enable same-origin proxy auth handler
+const getAuthDomain = (): string => {
+  if (typeof window !== 'undefined' && window.location.hostname === 'infinity-fitness-club-pro.vercel.app') {
+    return 'infinity-fitness-club-pro.vercel.app';
+  }
+  return firebaseConfig.authDomain || 'swift-fx-h1ttq.firebaseapp.com';
+};
+
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().length === 0 
+  ? initializeApp({
+      ...firebaseConfig,
+      authDomain: getAuthDomain()
+    }) 
+  : getApp();
 
 export const db = firebaseConfig.firestoreDatabaseId
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
 export const auth = getAuth(app);
+
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 export interface AppAuthUser {
   uid: string;
@@ -37,75 +56,152 @@ export interface AppAuthUser {
   emailVerified?: boolean;
 }
 
-// Active session state tracking (combining Firebase Auth and fast preview session)
-let sessionAuthUser: AppAuthUser | null = (() => {
-  try {
-    const raw = sessionStorage.getItem('infinity_active_user');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
+// Conservative mobile detection helper for selecting authentication UX
+export const isMobileDevice = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const isSmallScreen = window.innerWidth <= 768;
+  return isMobileUA || (isSmallScreen && isTouch);
+};
+
+export interface AuthErrorInfo {
+  code: string;
+  message: string;
+  isPopupBlocked?: boolean;
+  isCancelled?: boolean;
+  isUnauthorizedDomain?: boolean;
+  isOperationNotAllowed?: boolean;
+  isNetworkError?: boolean;
+}
+
+// Explicit Firebase Auth Error Parser
+export const parseAuthError = (err: any): AuthErrorInfo => {
+  const code = err?.code || '';
+  const rawMessage = err?.message || 'Authentication failed.';
+
+  if (code === 'auth/popup-blocked') {
+    return {
+      code,
+      message: 'Your browser blocked the Google sign-in window.',
+      isPopupBlocked: true
+    };
   }
-})();
-
-const authSubscribers = new Set<(user: AppAuthUser | null) => void>();
-
-// Subscribe to real Firebase Auth state changes with session memory
-export const subscribeToAuth = (callback: (user: AppAuthUser | null) => void): (() => void) => {
-  authSubscribers.add(callback);
-
-  // If a session already exists and Firebase hasn't resolved yet, inform subscriber
-  if (sessionAuthUser && !auth.currentUser) {
-    callback(sessionAuthUser);
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return {
+      code,
+      message: 'Google sign-in was cancelled.',
+      isCancelled: true
+    };
+  }
+  if (code === 'auth/unauthorized-domain') {
+    console.error('Firebase Auth technical error: unauthorized domain. Ensure "infinity-fitness-club-pro.vercel.app" is added in Firebase Console -> Authentication -> Settings -> Authorized domains.', err);
+    return {
+      code,
+      message: 'This website is not authorized for Firebase Authentication. Contact the system administrator.',
+      isUnauthorizedDomain: true
+    };
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return {
+      code,
+      message: 'This sign-in provider is not enabled yet in your Firebase Project Console. Please enable it in Firebase Console → Authentication → Sign-in method.',
+      isOperationNotAllowed: true
+    };
+  }
+  if (code === 'auth/network-request-failed') {
+    return {
+      code,
+      message: 'Network connection error. Please check your internet connection.',
+      isNetworkError: true
+    };
+  }
+  if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+    return {
+      code,
+      message: 'Invalid credentials. Please verify your email and password.'
+    };
+  }
+  if (code === 'auth/email-already-in-use') {
+    return {
+      code,
+      message: 'An account with this email already exists. Please sign in instead.'
+    };
+  }
+  if (code === 'auth/weak-password') {
+    return {
+      code,
+      message: 'Password must be at least 6 characters.'
+    };
   }
 
-  const unsubscribeFb = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
-    if (fbUser) {
-      sessionAuthUser = {
-        uid: fbUser.uid,
-        email: fbUser.email,
-        displayName: fbUser.displayName,
-        emailVerified: fbUser.emailVerified
-      };
-      try {
-        sessionStorage.setItem('infinity_active_user', JSON.stringify(sessionAuthUser));
-      } catch {}
-      callback(sessionAuthUser);
-    } else {
-      // Check if user is using an instant preview session
-      if (sessionAuthUser) {
-        callback(sessionAuthUser);
-      } else {
-        callback(null);
-      }
-    }
-  });
-
-  return () => {
-    authSubscribers.delete(callback);
-    unsubscribeFb();
+  return {
+    code,
+    message: rawMessage
   };
 };
 
-// Real Firebase Google Sign-In
-export const signInWithGoogle = async (): Promise<AppAuthUser> => {
+// Strictly subscribe to real Firebase Auth state changes
+export const subscribeToAuth = (callback: (user: AppAuthUser | null) => void): (() => void) => {
+  return onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
+    if (!fbUser) {
+      callback(null);
+      return;
+    }
+    callback({
+      uid: fbUser.uid,
+      email: fbUser.email,
+      displayName: fbUser.displayName,
+      emailVerified: fbUser.emailVerified
+    });
+  });
+};
+
+// Resilient Google Sign-In: Desktop uses Popup first directly on click; Mobile uses Redirect
+export const signInWithGoogle = async (forceRedirect: boolean = false): Promise<AppAuthUser | null> => {
+  const shouldRedirect = forceRedirect || isMobileDevice();
+
+  if (shouldRedirect) {
+    await signInWithRedirect(auth, googleProvider);
+    return null;
+  }
+
+  // Desktop Popup - MUST be triggered directly from the user's click
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    const user: AppAuthUser = {
+    return {
       uid: result.user.uid,
       email: result.user.email,
       displayName: result.user.displayName,
       emailVerified: result.user.emailVerified
     };
-    sessionAuthUser = user;
-    try {
-      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
-    } catch {}
-    authSubscribers.forEach(cb => cb(user));
-    return user;
   } catch (err: any) {
-    if (err.code === 'auth/operation-not-allowed') {
-      err.friendlyMessage = 'Google Sign-In is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Google, and toggle Enable.';
+    console.warn('signInWithPopup failed:', err?.code, err?.message);
+    throw err;
+  }
+};
+
+// Explicit Google Redirect Sign-In
+export const signInWithGoogleRedirect = async (): Promise<void> => {
+  await signInWithRedirect(auth, googleProvider);
+};
+
+// Process redirect result after return (called on app mount)
+export const initAuthRedirect = async (): Promise<AppAuthUser | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      return {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        emailVerified: result.user.emailVerified
+      };
     }
+    return null;
+  } catch (err: any) {
+    console.error('getRedirectResult failed:', err);
     throw err;
   }
 };
@@ -113,68 +209,25 @@ export const signInWithGoogle = async (): Promise<AppAuthUser> => {
 // Real Firebase Email/Password Sign-In
 export const signInWithEmail = async (email: string, pass: string): Promise<AppAuthUser> => {
   const cleanEmail = email.trim().toLowerCase();
-  try {
-    const result = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-    const user: AppAuthUser = {
-      uid: result.user.uid,
-      email: result.user.email,
-      displayName: result.user.displayName,
-      emailVerified: result.user.emailVerified
-    };
-    sessionAuthUser = user;
-    try {
-      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
-    } catch {}
-    authSubscribers.forEach(cb => cb(user));
-    return user;
-  } catch (err: any) {
-    if (err.code === 'auth/operation-not-allowed') {
-      err.friendlyMessage = 'Email/Password provider is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Email/Password, and toggle Enable.';
-    }
-    throw err;
-  }
+  const result = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+  return {
+    uid: result.user.uid,
+    email: result.user.email,
+    displayName: result.user.displayName,
+    emailVerified: result.user.emailVerified
+  };
 };
 
 // Real Firebase Email/Password Registration
 export const signUpWithEmail = async (email: string, pass: string): Promise<AppAuthUser> => {
   const cleanEmail = email.trim().toLowerCase();
-  try {
-    const result = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
-    const user: AppAuthUser = {
-      uid: result.user.uid,
-      email: result.user.email,
-      displayName: result.user.displayName,
-      emailVerified: result.user.emailVerified
-    };
-    sessionAuthUser = user;
-    try {
-      sessionStorage.setItem('infinity_active_user', JSON.stringify(user));
-    } catch {}
-    authSubscribers.forEach(cb => cb(user));
-    return user;
-  } catch (err: any) {
-    if (err.code === 'auth/operation-not-allowed') {
-      err.friendlyMessage = 'Email/Password registration is not enabled yet in your Firebase Console. Please go to Firebase Console → Authentication → Sign-in method, click Email/Password, and toggle Enable.';
-    }
-    throw err;
-  }
-};
-
-// Instant Quick Sign-In (Allows testing portals immediately even when Firebase Console providers are pending configuration)
-export const signInAsDemoUser = (email: string, displayName?: string): AppAuthUser => {
-  const cleanEmail = email.trim().toLowerCase();
-  const demoUser: AppAuthUser = {
-    uid: `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
-    email: cleanEmail,
-    displayName: displayName || cleanEmail.split('@')[0],
-    emailVerified: true
+  const result = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+  return {
+    uid: result.user.uid,
+    email: result.user.email,
+    displayName: result.user.displayName,
+    emailVerified: result.user.emailVerified
   };
-  sessionAuthUser = demoUser;
-  try {
-    sessionStorage.setItem('infinity_active_user', JSON.stringify(demoUser));
-  } catch {}
-  authSubscribers.forEach(cb => cb(demoUser));
-  return demoUser;
 };
 
 // Real Firebase Password Reset Email
@@ -185,14 +238,7 @@ export const sendResetPassword = async (email: string): Promise<boolean> => {
 
 // Real Firebase Sign Out
 export const logoutUser = async (): Promise<void> => {
-  sessionAuthUser = null;
-  try {
-    sessionStorage.removeItem('infinity_active_user');
-  } catch {}
-  try {
-    await fbSignOut(auth);
-  } catch {}
-  authSubscribers.forEach(cb => cb(null));
+  await fbSignOut(auth);
 };
 
 // Firestore Profile management

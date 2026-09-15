@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Lock, 
   Mail, 
@@ -11,11 +11,16 @@ import {
   Loader2, 
   ArrowLeft,
   ExternalLink,
-  Zap,
   Info,
   KeyRound
 } from 'lucide-react';
-import { signInWithEmail, signInWithGoogle, sendResetPassword, signInAsDemoUser } from '../../lib/firebase';
+import { 
+  signInWithEmail, 
+  signInWithGoogle, 
+  signInWithGoogleRedirect,
+  sendResetPassword, 
+  parseAuthError 
+} from '../../lib/firebase';
 import { GymSettings } from '../../types';
 
 interface StaffLoginProps {
@@ -34,10 +39,12 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const emailInputRef = useRef<HTMLInputElement>(null);
   
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const [showProviderNotice, setShowProviderNotice] = useState(false);
 
   // Forgot password
@@ -56,6 +63,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
 
     setLoading(true);
     setErrorMessage(null);
+    setPopupBlocked(false);
     setShowProviderNotice(false);
 
     try {
@@ -63,52 +71,68 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
       onSuccess(user.email || email);
     } catch (err: any) {
       console.error('Staff auth error:', err);
-      const code = err.code || '';
-      if (code === 'auth/operation-not-allowed') {
+      const parsed = parseAuthError(err);
+      setErrorMessage(parsed.message);
+      if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);
-        setErrorMessage('Firebase Authentication has not enabled this sign-in provider yet in the Firebase Console.');
-      } else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        setErrorMessage('Invalid staff credentials. Please check your email and password or use quick access below.');
-      } else if (code === 'auth/network-request-failed') {
-        setErrorMessage('Network error. Please check your internet connection.');
-      } else {
-        setErrorMessage(err.message || 'Staff sign-in failed. Please verify credentials.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (forceRedirect: boolean = false) => {
     setGoogleLoading(true);
     setErrorMessage(null);
+    setPopupBlocked(false);
     setShowProviderNotice(false);
 
     try {
-      const user = await signInWithGoogle();
-      onSuccess(user.email || '');
+      const user = await signInWithGoogle(forceRedirect);
+      if (user) {
+        onSuccess(user.email || '');
+      }
     } catch (err: any) {
       console.error('Google sign in error:', err);
-      if (err.code === 'auth/operation-not-allowed') {
+      const parsed = parseAuthError(err);
+      setErrorMessage(parsed.message);
+      if (parsed.isPopupBlocked) {
+        setPopupBlocked(true);
+      }
+      if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);
-        setErrorMessage('Google Sign-In is not enabled yet in your Firebase Project Console (swift-fx-h1ttq).');
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        setErrorMessage('Google sign-in was cancelled.');
-      } else if (err.code === 'auth/network-request-failed') {
-        setErrorMessage('Network connection error. Please check your internet connection.');
-      } else {
-        setErrorMessage(err.message || 'Google Sign-In failed. Please try again or use quick access.');
       }
     } finally {
       setGoogleLoading(false);
     }
   };
 
-  const handleQuickLogin = (demoEmail: string, name: string) => {
+  const handleGoogleRedirect = async () => {
+    setGoogleLoading(true);
     setErrorMessage(null);
+    setPopupBlocked(false);
     setShowProviderNotice(false);
-    signInAsDemoUser(demoEmail, name);
-    onSuccess(demoEmail);
+
+    try {
+      await signInWithGoogleRedirect();
+    } catch (err: any) {
+      console.error('Google redirect error:', err);
+      const parsed = parseAuthError(err);
+      setErrorMessage(parsed.message);
+      if (parsed.isOperationNotAllowed) {
+        setShowProviderNotice(true);
+      }
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleUseEmailLogin = () => {
+    setPopupBlocked(false);
+    setErrorMessage(null);
+    if (emailInputRef.current) {
+      emailInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      emailInputRef.current.focus();
+    }
   };
 
   const handlePasswordReset = async (e: React.FormEvent) => {
@@ -127,7 +151,8 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
       setResetSuccess(`Password reset instructions sent to ${resetEmail}.`);
     } catch (err: any) {
       console.error('Reset error:', err);
-      setResetError(err.message || 'Failed to send reset link.');
+      const parsed = parseAuthError(err);
+      setResetError(parsed.message);
     } finally {
       setResetLoading(false);
     }
@@ -178,7 +203,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
           </div>
 
           {/* Error Banner & Firebase Provider Guide */}
-          {errorMessage && (
+          {errorMessage && !popupBlocked && (
             <div className="mt-4 p-3.5 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-2 animate-in fade-in">
               <div className="flex items-start gap-2.5">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
@@ -211,60 +236,55 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
             </div>
           )}
 
-          {/* Quick Instant Test Access */}
-          <div className="mt-5 p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold font-mono uppercase text-emerald-400 flex items-center gap-1.5">
-                <Zap className="w-3 h-3" />
-                Instant Portal Access (One-Click)
-              </span>
-              <span className="text-[9px] text-zinc-500 uppercase">Bypass pending setup</span>
-            </div>
-            <div className="grid grid-cols-1 gap-1.5">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('dgtfamilyyt8@gmail.com', 'Karan Singhania (Club Owner)')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
-              >
+          {/* Friendly Inline Panel: When Popup Is Blocked by Browser */}
+          {popupBlocked && (
+            <div className="mt-4 p-4 rounded-2xl bg-amber-950/30 border border-amber-500/40 text-amber-200 text-xs space-y-3 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                 <div>
-                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Club Owner & Admin</div>
-                  <div className="text-[10px] text-zinc-400 font-mono">dgtfamilyyt8@gmail.com</div>
+                  <h4 className="font-bold text-amber-300 text-xs uppercase tracking-wide">
+                    Google sign-in was blocked by your browser.
+                  </h4>
+                  <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed">
+                    Your browser blocked the Google sign-in window. You can retry opening the popup, continue using full-page redirect, or authenticate with your staff email.
+                  </p>
                 </div>
-                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
-              </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('rahul.sharma@infinityfitnessclub.in', 'Rahul Sharma (Head Coach)')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
-              >
-                <div>
-                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Head Coach & Floor Trainer</div>
-                  <div className="text-[10px] text-zinc-400 font-mono">rahul.sharma@infinityfitnessclub.in</div>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('priya.verma@infinityfitnessclub.in', 'Priya Verma (Front Desk)')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-zinc-950 hover:bg-emerald-950/30 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-200 hover:text-white transition flex items-center justify-between group"
-              >
-                <div>
-                  <div className="font-bold text-[11px] text-emerald-400 group-hover:text-emerald-300">Front Desk & Reception</div>
-                  <div className="text-[10px] text-zinc-400 font-mono">priya.verma@infinityfitnessclub.in</div>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition" />
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleGoogleSignIn(false)}
+                  disabled={googleLoading}
+                  className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-[11px] uppercase tracking-wider transition text-center shadow-sm"
+                >
+                  Try Google Again
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGoogleRedirect}
+                  disabled={googleLoading}
+                  className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-amber-500/40 text-amber-300 font-bold text-[11px] uppercase tracking-wider transition text-center"
+                >
+                  Continue Using Redirect
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUseEmailLogin}
+                  className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 font-bold text-[11px] uppercase tracking-wider transition text-center"
+                >
+                  Use Staff Email
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Quick Google Sign In */}
           <div className="mt-6">
             <button
               type="button"
               disabled={googleLoading || loading}
-              onClick={handleGoogleSignIn}
+              onClick={() => handleGoogleSignIn(false)}
               className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-bold transition flex items-center justify-center gap-3 disabled:opacity-50"
             >
               {googleLoading ? (
@@ -296,6 +316,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
               <div className="relative">
                 <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
                 <input
+                  ref={emailInputRef}
                   type="email"
                   required
                   placeholder="coach@infinityfitnessclub.in"
