@@ -13,7 +13,8 @@ import {
   Users, 
   Award, 
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  MessageCircle
 } from 'lucide-react';
 import { GymSettings, MembershipPlan, UserProfile } from '../../types';
 import { GoogleMapsLocation } from '../common/GoogleMapsLocation';
@@ -408,6 +409,18 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
                   </>
                 )}
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <MessageCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+              <a
+                href={`https://wa.me/91${(settings.whatsapp || settings.phone).replace(/\D/g, '').slice(-10)}?text=Hi%20Infinity%20Fitness%20Club,%20I%20would%20like%20to%20inquire%20about%20membership`}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                className="hover:text-emerald-400 transition"
+              >
+                WhatsApp: {settings.whatsapp || settings.phone}
+              </a>
             </div>
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4 text-emerald-400 shrink-0" />

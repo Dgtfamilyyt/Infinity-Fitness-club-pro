@@ -136,12 +136,6 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
     }
   };
 
-  const fillMemberDemo = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('Infinity@2026');
-    setErrorMessage(null);
-  };
-
   return (
     <div className="min-h-screen w-full bg-[#09090b] flex flex-col justify-center">
       {/* Back button */}
@@ -383,36 +377,6 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                   )}
                 </button>
               </form>
-
-              {/* Quick Test Fillers for Reviewers */}
-              <div className="mt-6 pt-5 border-t border-zinc-800/80">
-                <div className="text-[10px] uppercase font-mono text-zinc-500 font-bold mb-2">
-                  Quick Demo Athletes (1-Click Fill):
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fillMemberDemo('arun.patel@gmail.com')}
-                    className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-[11px] border border-zinc-800"
-                  >
-                    Arun Patel (Chest/Tri)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fillMemberDemo('neha.kapoor@gmail.com')}
-                    className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-[11px] border border-zinc-800"
-                  >
-                    Neha Kapoor (VIP)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fillMemberDemo('rohit.sharma88@gmail.com')}
-                    className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-[11px] border border-zinc-800"
-                  >
-                    Rohit Deshmukh
-                  </button>
-                </div>
-              </div>
 
               {/* Mobile Staff Link */}
               <div className="mt-6 pt-4 border-t border-zinc-800/80 text-center lg:hidden">

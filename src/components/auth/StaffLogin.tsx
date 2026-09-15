@@ -114,12 +114,6 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
     }
   };
 
-  const fillStaffDemo = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('Infinity@2026');
-    setErrorMessage(null);
-  };
-
   return (
     <div className="min-h-screen w-full bg-[#070709] flex flex-col justify-center">
       {/* Top back link */}
@@ -273,39 +267,6 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
               )}
             </button>
           </form>
-
-          {/* Quick Staff Credentials for Evaluation */}
-          <div className="mt-6 pt-5 border-t border-zinc-800/80">
-            <div className="text-[10px] uppercase font-mono text-zinc-500 font-bold mb-2">
-              Staff Test Personas (1-Click Fill):
-            </div>
-            <div className="grid grid-cols-1 gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => fillStaffDemo('rahul.sharma@infinityfitnessclub.in')}
-                className="w-full py-1.5 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-left border border-zinc-800 flex items-center justify-between"
-              >
-                <span>Coach Rahul Sharma</span>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold">TRAINER</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillStaffDemo('reception@infinityfitnessclub.in')}
-                className="w-full py-1.5 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-left border border-zinc-800 flex items-center justify-between"
-              >
-                <span>Reception Front Desk</span>
-                <span className="text-[10px] font-mono text-cyan-400 font-bold">RECEPTION/ADMIN</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillStaffDemo('owner@infinityfitnessclub.in')}
-                className="w-full py-1.5 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-left border border-zinc-800 flex items-center justify-between"
-              >
-                <span>Karan Singhania (Director)</span>
-                <span className="text-[10px] font-mono text-amber-400 font-bold">CLUB OWNER</span>
-              </button>
-            </div>
-          </div>
 
           <div className="mt-6 pt-4 border-t border-zinc-800/80 text-center text-[11px] text-zinc-500">
             Internal Gym Portal • Authenticated through Firebase Security Rules

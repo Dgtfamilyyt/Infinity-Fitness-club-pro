@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, GymZone, ActiveGymSession, PaymentRecord } from '../../types';
 import { dataService } from '../../services/dataService';
+import { attendanceService } from '../../services/attendanceService';
 import { QRScannerModal } from '../common/QRScannerModal';
 import { LiveFloorStatus } from '../common/LiveFloorStatus';
 
@@ -43,17 +44,33 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
   const [payMethod, setPayMethod] = useState<PaymentRecord['paymentMethod']>('UPI');
   const [payRef, setPayRef] = useState('');
 
-  const handleManualCheckIn = (e: React.FormEvent) => {
+  const handleManualCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
 
-    const res = dataService.checkInMember(manualInput, 'MANUAL', 'Reception Desk');
-    setScanMessage({ success: res.success, text: res.message });
+    try {
+      const res = await attendanceService.processMemberCheckIn({
+        rawIdentifier: manualInput,
+        method: 'MANUAL',
+        staffName: 'Reception Desk'
+      });
+      setScanMessage({ success: res.success, text: res.message });
+    } catch {
+      const fallback = dataService.checkInMember(manualInput, 'MANUAL', 'Reception Desk');
+      setScanMessage({ success: fallback.success, text: fallback.message });
+    }
     setManualInput('');
   };
 
-  const handleCheckOut = (sessionId: string) => {
-    dataService.checkOutMember(sessionId, 'Reception Desk');
+  const handleCheckOut = async (sessionId: string) => {
+    try {
+      await attendanceService.processMemberCheckOut({
+        memberUid: sessionId,
+        staffName: 'Reception Desk'
+      });
+    } catch {
+      dataService.checkOutMember(sessionId, 'Reception Desk');
+    }
   };
 
   const handleRecordPayment = (e: React.FormEvent) => {

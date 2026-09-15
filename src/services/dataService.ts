@@ -24,77 +24,141 @@ import {
   INITIAL_ATTENDANCE_LOGS
 } from './seedData';
 import { evaluateWorkoutAssignment } from './workoutEngine';
-import { fetchUserProfile, saveUserProfile } from '../lib/firebase';
+import { gymSettingsService } from './gymSettingsService';
+import { zoneService } from './zoneService';
+import { membershipService } from './membershipService';
+import { memberService } from './memberService';
+import { trainerService } from './trainerService';
+import { paymentService } from './paymentService';
+import { workoutService } from './workoutService';
+import { progressService } from './progressService';
+import { auditService } from './auditService';
+import { attendanceService } from './attendanceService';
 
-const STORAGE_KEYS = {
-  SETTINGS: 'ifc_gym_settings',
-  ZONES: 'ifc_gym_zones',
-  PLANS: 'ifc_plans',
-  MEMBERS: 'ifc_members',
-  TRAINERS: 'ifc_trainers',
-  STAFF: 'ifc_staff',
-  SESSIONS: 'ifc_active_sessions',
-  WORKOUT: 'ifc_workout_arun',
-  PAYMENTS: 'ifc_payments',
-  PRS: 'ifc_prs',
-  ATTENDANCE: 'ifc_attendance',
-  AUDIT: 'ifc_audit_logs'
-};
-
-function loadStorage<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveStorage<T>(key: string, val: T): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(key, JSON.stringify(val));
-  } catch (e) {
-    console.error('Storage error:', e);
-  }
-}
-
+/**
+ * DataService acts as the reactive client-side cache and coordinator.
+ * Operates purely in-memory, backed continuously and authoritative by Firestore real-time snapshots.
+ * NO operational database storage in localStorage.
+ */
 class DataService {
-  private settings: GymSettings = loadStorage(STORAGE_KEYS.SETTINGS, INITIAL_GYM_SETTINGS);
-  private zones: GymZone[] = loadStorage(STORAGE_KEYS.ZONES, INITIAL_ZONES);
-  private plans: MembershipPlan[] = loadStorage(STORAGE_KEYS.PLANS, INITIAL_PLANS);
-  private members: UserProfile[] = loadStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
-  private trainers: UserProfile[] = loadStorage(STORAGE_KEYS.TRAINERS, INITIAL_TRAINERS);
-  private staff: UserProfile[] = loadStorage(STORAGE_KEYS.STAFF, INITIAL_STAFF);
-  private activeSessions: ActiveGymSession[] = loadStorage(STORAGE_KEYS.SESSIONS, INITIAL_ACTIVE_SESSIONS);
-  private arunWorkout: WorkoutAssignment = loadStorage(STORAGE_KEYS.WORKOUT, INITIAL_TODAY_WORKOUT_ARUN);
-  private payments: PaymentRecord[] = loadStorage(STORAGE_KEYS.PAYMENTS, INITIAL_PAYMENTS);
-  private personalRecords: PersonalRecord[] = loadStorage(STORAGE_KEYS.PRS, INITIAL_PERSONAL_RECORDS);
-  private attendanceLogs: AttendanceRecord[] = loadStorage(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE_LOGS);
-  private auditLogs: AuditLog[] = loadStorage(STORAGE_KEYS.AUDIT, [
+  private settings: GymSettings = INITIAL_GYM_SETTINGS;
+  private zones: GymZone[] = INITIAL_ZONES;
+  private plans: MembershipPlan[] = INITIAL_PLANS;
+  private members: UserProfile[] = INITIAL_MEMBERS;
+  private trainers: UserProfile[] = INITIAL_TRAINERS;
+  private staff: UserProfile[] = INITIAL_STAFF;
+  private activeSessions: ActiveGymSession[] = INITIAL_ACTIVE_SESSIONS;
+  private arunWorkout: WorkoutAssignment = INITIAL_TODAY_WORKOUT_ARUN;
+  private payments: PaymentRecord[] = INITIAL_PAYMENTS;
+  private personalRecords: PersonalRecord[] = INITIAL_PERSONAL_RECORDS;
+  private attendanceLogs: AttendanceRecord[] = INITIAL_ATTENDANCE_LOGS;
+  private auditLogs: AuditLog[] = [
     {
       id: 'audit-1',
       actor: 'System Engine',
       action: 'BOOTSTRAP',
       targetEntity: 'Infinity System',
       targetId: 'INIT',
-      timestamp: new Date(Date.now() - 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       details: 'Initialized smart gym floor zones and crowd balance parameters'
     }
-  ]);
+  ];
 
   private listeners: Set<() => void> = new Set();
+  private unsubs: (() => void)[] = [];
+  private roleUnsubs: (() => void)[] = [];
 
   constructor() {
-    // Automatically migrate old mock address to verified Google Maps real-world location
-    if (
-      !this.settings.googleMapsUrl || 
-      this.settings.address.includes('Zenith Boulevard') || 
-      !this.settings.coordinates
-    ) {
-      this.settings = { ...this.settings, ...INITIAL_GYM_SETTINGS };
-      saveStorage(STORAGE_KEYS.SETTINGS, this.settings);
+    this.initRealtimeFirestoreSync();
+  }
+
+  private initRealtimeFirestoreSync() {
+    try {
+      // 1. Gym Settings (Public)
+      this.unsubs.push(
+        gymSettingsService.subscribeSettings('infinity-neelambur', (settings) => {
+          this.settings = settings;
+          this.notify();
+        })
+      );
+
+      // 2. Gym Zones & Occupancy (Public)
+      this.unsubs.push(
+        zoneService.subscribeZones((zones) => {
+          this.zones = zones;
+          this.notify();
+        })
+      );
+
+      // 3. Membership Plans (Public)
+      this.unsubs.push(
+        membershipService.subscribePlans((plans) => {
+          this.plans = plans;
+          this.notify();
+        })
+      );
+
+      // 4. Trainers Directory (Public)
+      this.unsubs.push(
+        trainerService.subscribeTrainers((trainers) => {
+          this.trainers = trainers;
+          this.notify();
+        })
+      );
+    } catch (err) {
+      console.warn('Real-time Firestore listeners initialization deferred:', err);
+    }
+  }
+
+  /**
+   * Dynamically attaches or detaches role-scoped listeners (e.g. Audit Logs, Payments, Members)
+   * strictly when an authenticated user with sufficient authorization is active.
+   */
+  public syncForUser(user: UserProfile | null) {
+    // 1. Clean up existing role-scoped subscriptions
+    this.roleUnsubs.forEach(unsub => {
+      try { unsub(); } catch {}
+    });
+    this.roleUnsubs = [];
+
+    if (!user) {
+      this.auditLogs = [];
+      this.notify();
+      return;
+    }
+
+    const isStaff = user.role === 'trainer' || user.role === 'admin' || user.role === 'owner';
+    const isAdminOrOwner = user.role === 'admin' || user.role === 'owner';
+
+    try {
+      // Staff members get access to Member list
+      if (isStaff) {
+        this.roleUnsubs.push(
+          memberService.subscribeMembers((members) => {
+            this.members = members;
+            this.notify();
+          })
+        );
+      }
+
+      // Only Admins and Owners get access to sensitive Payments and Audit Logs
+      if (isAdminOrOwner) {
+        this.roleUnsubs.push(
+          paymentService.subscribePayments((payments) => {
+            this.payments = payments;
+            this.notify();
+          })
+        );
+
+        this.roleUnsubs.push(
+          auditService.subscribeAuditLogs((logs) => {
+            this.auditLogs = logs;
+            this.notify();
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to establish role-based subscriptions:', err);
     }
   }
 
@@ -104,7 +168,13 @@ class DataService {
   }
 
   private notify() {
-    this.listeners.forEach(cb => cb());
+    this.listeners.forEach(cb => {
+      try {
+        cb();
+      } catch (e) {
+        console.error('Listener callback error:', e);
+      }
+    });
   }
 
   // Getters
@@ -128,27 +198,17 @@ class DataService {
   }
 
   upsertProfile(profile: UserProfile): void {
-    const listKey = profile.role === 'member' 
-      ? 'members' 
+    const list = profile.role === 'member' 
+      ? this.members 
       : profile.role === 'trainer' 
-      ? 'trainers' 
-      : 'staff';
-    const storageKey = profile.role === 'member'
-      ? STORAGE_KEYS.MEMBERS
-      : profile.role === 'trainer'
-      ? STORAGE_KEYS.TRAINERS
-      : STORAGE_KEYS.STAFF;
-
-    const list = this[listKey];
+      ? this.trainers 
+      : this.staff;
     const idx = list.findIndex(p => p.id === profile.id || (profile.uid && p.uid === profile.uid) || p.email.toLowerCase() === profile.email.toLowerCase());
     if (idx >= 0) {
       list[idx] = { ...list[idx], ...profile };
     } else {
       list.push(profile);
     }
-    saveStorage(storageKey, list);
-    // Background sync to Firestore
-    saveUserProfile(profile).catch(() => {});
     this.notify();
   }
 
@@ -159,6 +219,73 @@ class DataService {
   getAttendanceLogs(): AttendanceRecord[] { return this.attendanceLogs; }
   getAuditLogs(): AuditLog[] { return this.auditLogs; }
 
+  syncActiveSessionsFromFirestore(sessions: ActiveGymSession[]) {
+    this.activeSessions = sessions;
+    this.notify();
+  }
+
+  syncZonesFromFirestore(zones: GymZone[]) {
+    this.zones = zones;
+    this.notify();
+  }
+
+  recordSuccessfulCheckIn(params: {
+    session: ActiveGymSession;
+    attendance: AttendanceRecord;
+    assignedZoneId: string;
+  }) {
+    const { session, attendance, assignedZoneId } = params;
+    this.activeSessions = [session, ...this.activeSessions.filter(s => s.memberId !== session.memberId && s.id !== session.id)];
+    this.attendanceLogs = [attendance, ...this.attendanceLogs.filter(a => a.id !== attendance.id)];
+
+    this.zones = this.zones.map(z => {
+      if (z.id === assignedZoneId) {
+        const newOcc = z.currentOccupancy + 1;
+        return {
+          ...z,
+          currentOccupancy: newOcc,
+          status: newOcc >= z.capacity ? 'FULL' : newOcc >= z.capacity - 1 ? 'BUSY' : 'AVAILABLE'
+        };
+      }
+      return z;
+    });
+
+    this.members = this.members.map(m => m.id === session.memberId ? { ...m, attendanceStreak: (m.attendanceStreak || 0) + 1 } : m);
+    this.notify();
+  }
+
+  recordSuccessfulCheckOut(sessionId: string, exitTimeStr: string, actor: string = 'Staff Desk') {
+    const session = this.activeSessions.find(s => s.id === sessionId || s.memberId === sessionId);
+    if (!session) return;
+
+    this.zones = this.zones.map(z => {
+      if (z.id === session.zoneId) {
+        const newOcc = Math.max(0, z.currentOccupancy - 1);
+        return {
+          ...z,
+          currentOccupancy: newOcc,
+          status: newOcc >= z.capacity ? 'FULL' : newOcc >= z.capacity - 1 ? 'BUSY' : 'AVAILABLE'
+        };
+      }
+      return z;
+    });
+
+    this.attendanceLogs = this.attendanceLogs.map(att => {
+      if (att.memberId === session.memberId && !att.exit) {
+        return {
+          ...att,
+          exit: exitTimeStr,
+          durationMinutes: 60
+        };
+      }
+      return att;
+    });
+
+    this.activeSessions = this.activeSessions.filter(s => s.id !== session.id && s.memberId !== session.memberId);
+    this.addAudit(actor, 'CHECK_OUT', 'ActiveGymSession', session.id, `${session.memberName} checked out from ${session.zoneName}`);
+    this.notify();
+  }
+
   // Check-In Logic
   checkInMember(identifier: string, method: 'QR' | 'MEMBER_ID' | 'MANUAL', checkedInBy: string = 'Staff Desk'): {
     success: boolean;
@@ -167,7 +294,6 @@ class DataService {
     recommendation?: any;
   } {
     const cleanId = identifier.trim().toUpperCase();
-    // Resolve member by memberId, qrToken, email, or id
     const member = this.members.find(m => 
       (m.memberId && m.memberId.toUpperCase() === cleanId) ||
       (m.qrToken && m.qrToken.toUpperCase() === cleanId) ||
@@ -179,7 +305,6 @@ class DataService {
       return { success: false, message: `Member not found for badge/token: "${identifier}"` };
     }
 
-    // Check membership status
     if (member.status === 'EXPIRED') {
       return { 
         success: false, 
@@ -193,7 +318,6 @@ class DataService {
       };
     }
 
-    // Prevent duplicate active session
     const existing = this.activeSessions.find(s => s.memberId === member.id);
     if (existing) {
       return {
@@ -202,11 +326,9 @@ class DataService {
       };
     }
 
-    // Run smart workout engine to assign optimal zone
     const recommendation = evaluateWorkoutAssignment(member, this.zones);
     const assignedZone = this.zones.find(z => z.id === recommendation.recommendedZoneId) || this.zones[0];
 
-    // Create session
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const newSession: ActiveGymSession = {
       id: `session-${Date.now()}`,
@@ -223,22 +345,6 @@ class DataService {
       checkedInBy
     };
 
-    // Increment zone occupancy
-    this.zones = this.zones.map(z => {
-      if (z.id === assignedZone.id) {
-        const newOcc = z.currentOccupancy + 1;
-        return {
-          ...z,
-          currentOccupancy: newOcc,
-          status: newOcc >= z.capacity ? 'FULL' : newOcc >= z.capacity - 1 ? 'BUSY' : 'AVAILABLE'
-        };
-      }
-      return z;
-    });
-
-    this.activeSessions = [newSession, ...this.activeSessions];
-
-    // Record attendance log
     const newAttendance: AttendanceRecord = {
       id: `att-${Date.now()}`,
       memberId: member.id,
@@ -249,68 +355,146 @@ class DataService {
       method,
       date: new Date().toISOString().split('T')[0]
     };
-    this.attendanceLogs = [newAttendance, ...this.attendanceLogs];
 
-    // Audit log
-    this.addAudit(checkedInBy, 'CHECK_IN', 'ActiveGymSession', newSession.id, `${member.fullName} checked in via ${method} -> ${assignedZone.name}`);
+    this.recordSuccessfulCheckIn({
+      session: newSession,
+      attendance: newAttendance,
+      assignedZoneId: assignedZone.id
+    });
 
-    // Update streak if applicable
-    this.members = this.members.map(m => m.id === member.id ? { ...m, attendanceStreak: (m.attendanceStreak || 0) + 1 } : m);
-
-    this.saveAll();
-    this.notify();
+    this.addAudit(checkedInBy, 'CHECK_IN', 'ActiveGymSession', newSession.id, `${member.fullName} checked in via ${method}`);
 
     return {
       success: true,
-      message: `Welcome back, ${member.fullName}! Assigned to ${assignedZone.name} (${recommendation.recommendedWorkout}).`,
+      message: `Welcome, ${member.fullName}! Assigned to ${assignedZone.name}.`,
       session: newSession,
       recommendation
     };
   }
 
-  // Check-Out Logic
-  checkOutMember(sessionId: string, actor: string = 'Staff Desk'): boolean {
-    const session = this.activeSessions.find(s => s.id === sessionId);
-    if (!session) return false;
+  checkOutMember(sessionId: string, checkedOutBy: string = 'Staff Desk'): {
+    success: boolean;
+    message: string;
+    session?: ActiveGymSession;
+  } {
+    const session = this.activeSessions.find(s => s.id === sessionId || s.memberId === sessionId);
+    if (!session) {
+      return { success: false, message: 'Session not found or already checked out' };
+    }
 
-    // Decrement zone occupancy
+    const exitStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    this.recordSuccessfulCheckOut(session.id, exitStr, checkedOutBy);
+
+    return {
+      success: true,
+      message: `${session.memberName} checked out successfully.`,
+      session
+    };
+  }
+
+  updateZoneCapacity(zoneId: string, newCapacity: number, actor: string = 'Director Karan Singhania'): void {
+    const oldZone = this.zones.find(z => z.id === zoneId);
+    if (!oldZone) return;
+
     this.zones = this.zones.map(z => {
-      if (z.id === session.zoneId) {
-        const newOcc = Math.max(0, z.currentOccupancy - 1);
+      if (z.id === zoneId) {
         return {
           ...z,
-          currentOccupancy: newOcc,
-          status: newOcc >= z.capacity ? 'FULL' : newOcc >= z.capacity - 1 ? 'BUSY' : 'AVAILABLE'
+          capacity: Number(newCapacity),
+          status: z.currentOccupancy >= newCapacity ? 'FULL' : z.currentOccupancy >= newCapacity - 1 ? 'BUSY' : 'AVAILABLE'
         };
       }
       return z;
     });
 
-    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Update attendance record with exit
-    this.attendanceLogs = this.attendanceLogs.map(att => {
-      if (att.memberId === session.memberId && !att.exit) {
-        return {
-          ...att,
-          exit: nowStr,
-          durationMinutes: 65 // calculated/estimated session
-        };
-      }
-      return att;
+    // Write directly to Firestore
+    zoneService.updateZoneCapacity(zoneId, newCapacity, actor).catch(e => {
+      console.warn('Firestore zone update error:', e);
     });
 
-    this.activeSessions = this.activeSessions.filter(s => s.id !== sessionId);
-
-    this.addAudit(actor, 'CHECK_OUT', 'ActiveGymSession', sessionId, `${session.memberName} checked out from ${session.zoneName}`);
-
-    this.saveAll();
+    this.addAudit(actor, 'UPDATE_ZONE_CAPACITY', 'GymZone', zoneId, `Changed capacity of ${oldZone.name} to ${newCapacity}`);
     this.notify();
-    return true;
   }
 
-  // Toggle Exercise Complete for Member
-  toggleExerciseComplete(exerciseId: string) {
+  addMember(memberData: Partial<UserProfile>, staffName: string = 'Reception'): UserProfile {
+    const newMember: UserProfile = {
+      id: `athlete_${Date.now()}`,
+      uid: `athlete_${Date.now()}`,
+      memberId: `IFC-${Math.floor(1000 + Math.random() * 9000)}`,
+      fullName: memberData.fullName || 'New Member',
+      email: memberData.email || `athlete${Date.now()}@infinityfitnessclub.in`,
+      phone: memberData.phone || '+91 98000 00000',
+      role: 'member',
+      status: 'ACTIVE',
+      isActive: true,
+      planName: memberData.planName || 'Quarterly Transformation',
+      membershipPlanId: 'plan-quarterly',
+      membershipStart: new Date().toISOString().split('T')[0],
+      membershipExpiry: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+      assignedTrainerName: memberData.assignedTrainerName || 'Rahul Sharma',
+      fitnessGoal: memberData.fitnessGoal || 'Hypertrophy & Strength',
+      experience: memberData.experience || 'Intermediate',
+      workoutFrequency: memberData.workoutFrequency || 4,
+      preferredTime: memberData.preferredTime || '6:00 PM',
+      restrictions: memberData.restrictions || 'None',
+      attendanceStreak: 0,
+      workoutStreak: 0,
+      qrToken: `IFC1.${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`
+    };
+
+    this.members = [newMember, ...this.members];
+
+    // Write to Firestore in background
+    memberService.createMember({
+      fullName: newMember.fullName,
+      email: newMember.email,
+      phone: newMember.phone || '',
+      planName: newMember.planName || 'Quarterly Transformation',
+      assignedTrainerName: newMember.assignedTrainerName || 'Rahul Sharma',
+      fitnessGoal: newMember.fitnessGoal || 'Hypertrophy & Strength',
+      restrictions: newMember.restrictions || 'None'
+    }, staffName).catch(e => console.warn('Firestore member create error:', e));
+
+    this.addAudit(staffName, 'ADD_MEMBER', 'UserProfile', newMember.id, `Created profile for ${newMember.fullName} (${newMember.memberId})`);
+    this.notify();
+    return newMember;
+  }
+
+  updateMember(memberId: string, updates: Partial<UserProfile>, staffName: string = 'Reception'): void {
+    this.members = this.members.map(m => m.id === memberId ? { ...m, ...updates } : m);
+    if (updates.status) {
+      memberService.updateMemberStatus(memberId, updates.status, staffName).catch(e => console.warn(e));
+    }
+    this.notify();
+  }
+
+  recordPayment(paymentData: Omit<PaymentRecord, 'id' | 'date'> & { date?: string }): PaymentRecord {
+    const newPayment: PaymentRecord = {
+      id: `pay-${Date.now()}`,
+      ...paymentData,
+      date: paymentData.date || new Date().toISOString().split('T')[0]
+    };
+
+    this.payments = [newPayment, ...this.payments];
+
+    // Write to Firestore
+    paymentService.recordPayment({
+      memberId: newPayment.memberId,
+      memberName: newPayment.memberName,
+      planName: newPayment.planName,
+      amount: newPayment.amount,
+      paymentMethod: newPayment.paymentMethod,
+      reference: newPayment.reference,
+      recordedBy: newPayment.recordedBy,
+      notes: newPayment.notes
+    }).catch(e => console.warn('Firestore payment record error:', e));
+
+    this.addAudit(newPayment.recordedBy, 'RECORD_PAYMENT', 'PaymentRecord', newPayment.id, `Recorded ₹${newPayment.amount} via ${newPayment.paymentMethod} from ${newPayment.memberName}`);
+    this.notify();
+    return newPayment;
+  }
+
+  toggleExerciseCompleted(exerciseId: string): void {
     const updatedExercises = this.arunWorkout.exercises.map(ex => {
       if (ex.id === exerciseId) {
         return { ...ex, completed: !ex.completed };
@@ -318,21 +502,27 @@ class DataService {
       return ex;
     });
 
-    const completedCount = updatedExercises.filter(ex => ex.completed).length;
-    const completionPercentage = Math.round((completedCount / updatedExercises.length) * 100);
+    const completedCount = updatedExercises.filter(e => e.completed).length;
+    const totalCount = updatedExercises.length;
+    const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+    const isCompleted = completedCount === totalCount && totalCount > 0;
 
     this.arunWorkout = {
       ...this.arunWorkout,
       exercises: updatedExercises,
       completionPercentage,
-      isCompleted: completionPercentage === 100
+      isCompleted
     };
 
-    saveStorage(STORAGE_KEYS.WORKOUT, this.arunWorkout);
+    // Write to Firestore
+    workoutService.toggleExerciseComplete(this.arunWorkout.id, exerciseId, this.arunWorkout).catch(e => console.warn(e));
     this.notify();
   }
 
-  // Trainer Override
+  toggleExerciseComplete(exerciseId: string): void {
+    this.toggleExerciseCompleted(exerciseId);
+  }
+
   applyTrainerOverride(params: {
     memberId: string;
     originalWorkout: string;
@@ -341,186 +531,97 @@ class DataService {
     newZoneName: string;
     reason: string;
     trainerName: string;
-  }) {
-    // If active session exists, update it
-    this.activeSessions = this.activeSessions.map(s => {
-      if (s.memberId === params.memberId) {
-        return {
-          ...s,
-          workoutName: params.newWorkout,
-          zoneId: params.newZoneId,
-          zoneName: params.newZoneName
-        };
-      }
-      return s;
-    });
+  }): void {
+    const { newWorkout, reason, trainerName, newZoneId, newZoneName } = params;
+    this.arunWorkout = {
+      ...this.arunWorkout,
+      title: newWorkout,
+      zoneId: newZoneId,
+      zoneName: newZoneName,
+      isOverride: true,
+      overrideReason: `${newWorkout} - ${reason} (Approved by ${trainerName})`
+    };
 
-    // If Arun's workout, update it
-    if (this.arunWorkout.memberId === params.memberId) {
-      this.arunWorkout = {
-        ...this.arunWorkout,
-        title: params.newWorkout,
-        zoneId: params.newZoneId,
-        zoneName: params.newZoneName,
-        isOverride: true,
-        overrideReason: params.reason
-      };
-      saveStorage(STORAGE_KEYS.WORKOUT, this.arunWorkout);
+    workoutService.recordWorkoutOverride({
+      assignmentId: this.arunWorkout.id,
+      memberId: params.memberId,
+      memberName: this.arunWorkout.memberName,
+      trainerName,
+      originalWorkout: params.originalWorkout,
+      newWorkout,
+      reason
+    }).catch(e => console.warn(e));
+
+    this.addAudit(trainerName, 'OVERRIDE_WORKOUT', 'WorkoutAssignment', this.arunWorkout.id, `Overrode workout to "${newWorkout}" in ${newZoneName}. Reason: ${reason}`);
+    this.notify();
+  }
+
+  updateZone(zoneId: string, updates: Partial<GymZone>, actor: string = 'Director Karan Singhania'): void {
+    if (updates.capacity !== undefined) {
+      this.updateZoneCapacity(zoneId, updates.capacity, actor);
     }
-
-    this.addAudit(
-      params.trainerName,
-      'TRAINER_OVERRIDE',
-      'WorkoutAssignment',
-      params.memberId,
-      `Override: "${params.originalWorkout}" -> "${params.newWorkout}" in ${params.newZoneName}. Reason: ${params.reason}`
-    );
-
-    this.saveAll();
-    this.notify();
   }
 
-  // Add Member
-  addMember(memberData: Partial<UserProfile>): UserProfile {
-    const nextNum = 1000 + this.members.length + 1;
-    const newMember: UserProfile = {
-      id: `member-${Date.now()}`,
-      email: memberData.email || `member${nextNum}@infinityfitnessclub.in`,
-      fullName: memberData.fullName || 'New Member',
-      phone: memberData.phone || '+91 98000 00000',
-      role: 'member',
-      isActive: true,
-      memberId: `IFC-${nextNum}`,
-      qrToken: `IFC_TOKEN_SEC_${nextNum}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
-      status: memberData.status || 'ACTIVE',
-      membershipPlanId: memberData.membershipPlanId || 'plan-quarterly',
-      planName: memberData.planName || 'Quarterly Transformation',
-      membershipStart: new Date().toISOString().split('T')[0],
-      membershipExpiry: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
-      assignedTrainerId: memberData.assignedTrainerId || 'trainer-rahul',
-      assignedTrainerName: memberData.assignedTrainerName || 'Rahul Sharma',
-      fitnessGoal: memberData.fitnessGoal || 'General Fitness & Stamina',
-      experience: memberData.experience || 'Intermediate',
-      workoutFrequency: memberData.workoutFrequency || 4,
-      preferredTime: memberData.preferredTime || '6:00 PM',
-      restrictions: memberData.restrictions || 'None',
-      trainerNotes: memberData.trainerNotes || 'Newly registered member.',
-      attendanceStreak: 1,
-      workoutStreak: 1,
-      createdAt: new Date().toISOString()
+  overrideWorkout(newWorkoutName: string, reason: string, trainerName: string): void {
+    this.arunWorkout = {
+      ...this.arunWorkout,
+      title: newWorkoutName,
+      isOverride: true,
+      overrideReason: `${newWorkoutName} - ${reason} (Approved by ${trainerName})`
     };
 
-    this.members = [newMember, ...this.members];
-    this.addAudit('Admin', 'ADD_MEMBER', 'UserProfile', newMember.id, `Enrolled ${newMember.fullName} (${newMember.memberId}) under ${newMember.planName}`);
+    workoutService.recordWorkoutOverride({
+      assignmentId: this.arunWorkout.id,
+      memberId: this.arunWorkout.memberId,
+      memberName: this.arunWorkout.memberName,
+      trainerName,
+      originalWorkout: 'Chest + Triceps Hypertrophy',
+      newWorkout: newWorkoutName,
+      reason
+    }).catch(e => console.warn(e));
 
-    this.saveAll();
+    this.addAudit(trainerName, 'OVERRIDE_WORKOUT', 'WorkoutAssignment', this.arunWorkout.id, `Overrode workout to "${newWorkoutName}". Reason: ${reason}`);
     this.notify();
-    return newMember;
   }
 
-  // Record Payment
-  recordPayment(payment: {
-    memberId: string;
-    memberName: string;
-    planName: string;
-    amount: number;
-    paymentMethod: PaymentRecord['paymentMethod'];
-    reference: string;
-    recordedBy: string;
-    notes?: string;
-  }): PaymentRecord {
-    const newPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
-      memberId: payment.memberId,
-      memberName: payment.memberName,
-      planName: payment.planName,
-      amount: payment.amount,
-      paymentMethod: payment.paymentMethod,
-      reference: payment.reference || `REF-${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
-      recordedBy: payment.recordedBy,
-      notes: payment.notes
+  recordPersonalRecord(prData: Omit<PersonalRecord, 'id'>): PersonalRecord {
+    const newPR: PersonalRecord = {
+      id: `pr-${Date.now()}`,
+      ...prData
     };
+    this.personalRecords = [newPR, ...this.personalRecords];
 
-    this.payments = [newPayment, ...this.payments];
-    // Update member status to ACTIVE if was expired/trial
-    this.members = this.members.map(m => {
-      if (m.id === payment.memberId) {
-        return {
-          ...m,
-          status: 'ACTIVE',
-          planName: payment.planName,
-          membershipExpiry: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]
-        };
-      }
-      return m;
-    });
-
-    this.addAudit(payment.recordedBy, 'PAYMENT_RECORDED', 'PaymentRecord', newPayment.id, `Recorded ${payment.amount} (${payment.paymentMethod}) for ${payment.memberName}`);
-    this.saveAll();
+    progressService.recordPR(prData, prData.verifiedBy || 'Trainer').catch(e => console.warn(e));
+    this.addAudit(prData.verifiedBy || 'Trainer', 'RECORD_PR', 'PersonalRecord', newPR.id, `Logged new PR: ${prData.exercise} ${prData.weightKg}kg x ${prData.reps} reps`);
     this.notify();
-    return newPayment;
+    return newPR;
   }
 
-  // Update Settings
-  updateSettings(patch: Partial<GymSettings>) {
-    this.settings = { ...this.settings, ...patch };
-    saveStorage(STORAGE_KEYS.SETTINGS, this.settings);
-    this.addAudit('Owner', 'UPDATE_CMS', 'GymSettings', this.settings.id, `Updated website identity & settings`);
+  updateSettings(newSettings: Partial<GymSettings>, actor: string = 'Director Karan Singhania'): void {
+    this.settings = { ...this.settings, ...newSettings };
+    gymSettingsService.updateSettings(newSettings, actor).catch(e => console.warn(e));
+    this.addAudit(actor, 'UPDATE_CMS', 'GymSettings', this.settings.id, 'Updated gym CMS website parameters and hours');
     this.notify();
   }
 
-  // Update Zone
-  updateZone(zoneId: string, patch: Partial<GymZone>) {
-    this.zones = this.zones.map(z => z.id === zoneId ? { ...z, ...patch } : z);
-    saveStorage(STORAGE_KEYS.ZONES, this.zones);
-    this.addAudit('Admin', 'UPDATE_ZONE', 'GymZone', zoneId, `Updated zone parameters`);
-    this.notify();
-  }
-
-  // Reset to initial demo data
-  resetAllData() {
-    this.settings = INITIAL_GYM_SETTINGS;
-    this.zones = INITIAL_ZONES;
-    this.plans = INITIAL_PLANS;
-    this.members = INITIAL_MEMBERS;
-    this.trainers = INITIAL_TRAINERS;
-    this.activeSessions = INITIAL_ACTIVE_SESSIONS;
-    this.arunWorkout = INITIAL_TODAY_WORKOUT_ARUN;
-    this.payments = INITIAL_PAYMENTS;
-    this.personalRecords = INITIAL_PERSONAL_RECORDS;
-    this.attendanceLogs = INITIAL_ATTENDANCE_LOGS;
-    this.auditLogs = [];
-
-    this.saveAll();
-    this.addAudit('Admin', 'RESET_DATA', 'Database', 'SYSTEM', 'Reset system to clean seed data');
-    this.notify();
-  }
-
-  private addAudit(actor: string, action: string, targetEntity: string, targetId: string, details: string) {
-    const log: AuditLog = {
-      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+  addAudit(actor: string, action: string, targetEntity: string, targetId: string, details?: string): void {
+    const newLog: AuditLog = {
+      id: `audit-${Date.now()}`,
       actor,
       action,
       targetEntity,
       targetId,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       details
     };
-    this.auditLogs = [log, ...this.auditLogs.slice(0, 99)];
-    saveStorage(STORAGE_KEYS.AUDIT, this.auditLogs);
+    this.auditLogs = [newLog, ...this.auditLogs.slice(0, 99)];
+    auditService.logAuditEvent(actor, action, targetEntity, targetId, details).catch(() => {});
+    this.notify();
   }
 
-  private saveAll() {
-    saveStorage(STORAGE_KEYS.SETTINGS, this.settings);
-    saveStorage(STORAGE_KEYS.ZONES, this.zones);
-    saveStorage(STORAGE_KEYS.PLANS, this.plans);
-    saveStorage(STORAGE_KEYS.MEMBERS, this.members);
-    saveStorage(STORAGE_KEYS.TRAINERS, this.trainers);
-    saveStorage(STORAGE_KEYS.SESSIONS, this.activeSessions);
-    saveStorage(STORAGE_KEYS.PAYMENTS, this.payments);
-    saveStorage(STORAGE_KEYS.PRS, this.personalRecords);
-    saveStorage(STORAGE_KEYS.ATTENDANCE, this.attendanceLogs);
+  cleanup() {
+    this.unsubs.forEach(unsub => unsub());
+    this.unsubs = [];
   }
 }
 

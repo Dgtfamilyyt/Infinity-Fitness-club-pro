@@ -117,14 +117,8 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
   };
 
   const handleSaveZoneCapacity = (zoneId: string) => {
-    dataService.updateZone(zoneId, { capacity: Number(newCapacity) });
+    dataService.updateZoneCapacity(zoneId, Number(newCapacity), 'Admin Owner');
     setEditingZoneId(null);
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('Are you sure you want to reset demo data to initial seed state?')) {
-      dataService.resetAllData();
-    }
   };
 
   return (
@@ -142,14 +136,6 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleResetData}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-red-500/50 text-zinc-400 hover:text-red-400 text-xs transition"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Reset Demo Data</span>
-          </button>
-
           <button
             onClick={() => setShowAddMember(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-500/10"

@@ -157,7 +157,7 @@ export const GoogleMapsLocation: React.FC<GoogleMapsLocationProps> = ({
             </a>
 
             <a
-              href={`https://wa.me/91${settings.phone.replace(/\D/g, '').slice(-10)}?text=Hi%20Infinity%20Fitness%20Club,%20I%20would%20like%20to%20visit%20the%20gym%20in%20Neelambur`}
+              href={`https://wa.me/91${(settings.whatsapp || settings.phone).replace(/\D/g, '').slice(-10)}?text=Hi%20Infinity%20Fitness%20Club,%20I%20would%20like%20to%20visit%20the%20gym%20in%20Neelambur`}
               target="_blank"
               rel="noopener noreferrer"
               referrerPolicy="no-referrer"

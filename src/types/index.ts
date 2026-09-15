@@ -97,10 +97,13 @@ export interface WorkoutAssignment {
 export interface ActiveGymSession {
   id: string;
   memberId: string;
+  memberUid?: string;
   memberName: string;
   memberAvatar?: string;
   memberStatus: MemberStatus;
-  arrival: string; // ISO string or format
+  planName?: string;
+  arrival: string; // Time or ISO format e.g. "06:45 PM"
+  arrivedAtMs?: number;
   workoutName: string;
   zoneId: string;
   zoneName: string;
@@ -112,14 +115,55 @@ export interface ActiveGymSession {
 export interface AttendanceRecord {
   id: string;
   memberId: string;
+  memberUid?: string;
   memberName: string;
   arrival: string;
+  arrivedAtMs?: number;
   exit?: string;
+  exitedAtMs?: number;
   durationMinutes?: number;
   workoutName: string;
   zoneName: string;
   method: 'QR' | 'MEMBER_ID' | 'MANUAL';
   date: string;
+  checkedInBy?: string;
+  checkedOutBy?: string;
+}
+
+export interface QrTokenRecord {
+  memberUid: string;
+  memberId: string;
+  gymId: string;
+  active: boolean;
+  createdAt: string;
+  revokedAt?: string | null;
+  version: string; // 'IFC1'
+}
+
+export type CheckInStatus = 
+  | 'SUCCESS' 
+  | 'ALREADY_CHECKED_IN' 
+  | 'MEMBERSHIP_EXPIRED' 
+  | 'MEMBERSHIP_FROZEN' 
+  | 'CHECK_IN_REFUSED' 
+  | 'TRAINER_REVIEW_REQUIRED' 
+  | 'ZONE_CAPACITY_REASSIGNED';
+
+export interface CheckInResult {
+  success: boolean;
+  status: CheckInStatus;
+  message: string;
+  session?: ActiveGymSession;
+  member?: UserProfile;
+  recommendation?: any;
+  alternativeAssigned?: boolean;
+  restrictionsFlagged?: string[];
+}
+
+export interface CheckOutResult {
+  success: boolean;
+  message: string;
+  session?: ActiveGymSession;
 }
 
 export interface PaymentRecord {

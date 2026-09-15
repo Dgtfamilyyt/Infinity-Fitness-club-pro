@@ -1,94 +1,276 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAuthenticated() {
+
+    // ==========================================
+    // HELPER FUNCTIONS & AUTH CONTEXT
+    // ==========================================
+    function signedIn() {
       return request.auth != null;
     }
+
+    function myUid() {
+      return request.auth.uid;
+    }
+
+    function myEmail() {
+      return signedIn() && request.auth.token.email != null ? request.auth.token.email : '';
+    }
+
+    function isPreAuthorizedStaffEmail() {
+      return signedIn() && (
+        myEmail() in [
+          'owner@infinityfitnessclub.in',
+          'reception@infinityfitnessclub.in',
+          'rahul.sharma@infinityfitnessclub.in',
+          'priya.verma@infinityfitnessclub.in',
+          'vikram.singh@infinityfitnessclub.in',
+          'dgtfamilyyt8@gmail.com'
+        ] ||
+        myEmail().matches('.*@infinityfitnessclub\\.in$')
+      );
+    }
+
+    function isPreAuthorizedAdminEmail() {
+      return signedIn() && (
+        myEmail() in [
+          'owner@infinityfitnessclub.in',
+          'reception@infinityfitnessclub.in',
+          'dgtfamilyyt8@gmail.com'
+        ]
+      );
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/profiles/$(request.auth.uid));
+    }
+
     function getUserProfile() {
       return get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data;
     }
-    function isStaff() {
-      return isAuthenticated() && (getUserProfile().role in ['trainer', 'admin', 'owner']);
-    }
-    function isAdminOrOwner() {
-      return isAuthenticated() && (getUserProfile().role in ['admin', 'owner']);
-    }
-    function isOwner() {
-      return isAuthenticated() && (getUserProfile().role == 'owner');
-    }
-    function isOwnerOrSelf(userId) {
-      return isAuthenticated() && (request.auth.uid == userId || isStaff());
+
+    function myRole() {
+      return hasProfile() ? getUserProfile().role : '';
     }
 
-    // Public gym config & CMS info
+    function isStaff() {
+      return signedIn() && (
+        isPreAuthorizedStaffEmail() ||
+        (myRole() in ['trainer', 'admin', 'owner'])
+      );
+    }
+
+    function isTrainer() {
+      return signedIn() && (
+        (isPreAuthorizedStaffEmail() && myRole() == 'trainer') ||
+        myRole() == 'trainer'
+      );
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        myEmail() == 'reception@infinityfitnessclub.in' ||
+        myRole() == 'admin'
+      );
+    }
+
+    function isOwner() {
+      return signedIn() && (
+        myEmail() == 'owner@infinityfitnessclub.in' ||
+        myRole() == 'owner'
+      );
+    }
+
+    function isAdminOrOwner() {
+      return signedIn() && (
+        isPreAuthorizedAdminEmail() ||
+        (myRole() in ['admin', 'owner'])
+      );
+    }
+
+    // Allows initial database setup before gyms/infinity-neelambur is provisioned
+    function isBootstrap() {
+      return !exists(/databases/$(database)/documents/gyms/infinity-neelambur);
+    }
+
+    // ==========================================
+    // 1. GYM CONFIGURATION & CMS (Public Read)
+    // ==========================================
     match /gyms/{gymId} {
       allow read: if true;
-      allow write: if isAdminOrOwner();
+      allow write: if isBootstrap() || isAdminOrOwner();
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'whatsapp', 'altPhone', 'updatedAt']);
     }
 
-    // Gym zones (capacities, occupancy)
+    // ==========================================
+    // 2. GYM FLOOR ZONES & OCCUPANCY
+    // ==========================================
     match /gym_zones/{zoneId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if isBootstrap() || isStaff();
     }
 
-    // Membership plans
+    // ==========================================
+    // 3. MEMBERSHIP PLANS (Public Read)
+    // ==========================================
     match /membership_plans/{planId} {
       allow read: if true;
-      allow write: if isAdminOrOwner();
+      allow write: if isBootstrap() || isAdminOrOwner();
     }
 
-    // User profiles
+    // ==========================================
+    // 4. USER PROFILES
+    // ==========================================
     match /profiles/{userId} {
-      allow read: if isAuthenticated() && isOwnerOrSelf(userId);
-      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdminOrOwner());
+      allow read: if isBootstrap() || resource.data.role == 'trainer' || (signedIn() && (myUid() == userId || isStaff()));
+
+      allow create: if isBootstrap() || (signedIn() && (
+        isAdminOrOwner() || 
+        isStaff() || 
+        (myUid() == userId && request.resource.data.role == 'member')
+      ));
+
+      allow update: if isBootstrap() || (signedIn() && (
+        isAdminOrOwner() ||
+        (myUid() == userId && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'role', 'status', 'isActive', 'memberId', 'qrToken', 
+            'membershipPlanId', 'planName', 'membershipStart', 'membershipExpiry', 
+            'assignedTrainerId', 'gymId'
+          ])
+        ))
+      ));
+
+      allow delete: if isAdminOrOwner();
     }
 
-    // Active gym sessions
+    // ==========================================
+    // 5. MEMBERSHIPS
+    // ==========================================
+    match /memberships/{membershipId} {
+      allow read: if signedIn() && (resource.data.memberUid == myUid() || isStaff());
+      allow write: if isBootstrap() || isAdminOrOwner();
+    }
+
+    // ==========================================
+    // 6. QR ACCESS TOKENS (Doc ID = SHA-256 hash)
+    // ==========================================
+    match /qr_tokens/{tokenHash} {
+      allow read: if signedIn() && (isStaff() || (resource.data.memberUid == myUid()));
+      allow write: if isBootstrap() || isStaff();
+    }
+
+    // ==========================================
+    // 7. ACTIVE GYM FLOOR SESSIONS
+    // ==========================================
     match /active_gym_sessions/{sessionId} {
-      allow read: if isAuthenticated();
+      allow read: if signedIn() && (
+        isStaff() || 
+        resource.data.memberUid == myUid() || 
+        resource.data.memberId == myUid() ||
+        sessionId == myUid()
+      );
       allow write: if isStaff();
     }
 
-    // Attendance records
+    // ==========================================
+    // 8. ATTENDANCE RECORDS (Historical Logs)
+    // ==========================================
     match /attendance_records/{recordId} {
-      allow read: if isAuthenticated();
+      allow read: if signedIn() && (
+        isStaff() || 
+        resource.data.memberUid == myUid() || 
+        resource.data.memberId == myUid()
+      );
       allow write: if isStaff();
     }
 
-    // Workout assignments
+    // ==========================================
+    // 9. WORKOUT ASSIGNMENTS
+    // ==========================================
     match /workout_assignments/{assignmentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if signedIn() && (
+        isStaff() || 
+        resource.data.memberId == myUid() || 
+        resource.data.memberUid == myUid()
+      );
+
+      allow create: if isBootstrap() || isStaff();
+
+      allow update: if signedIn() && (
+        isStaff() || 
+        ((resource.data.memberId == myUid() || resource.data.memberUid == myUid()) && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'memberId', 'memberUid', 'date', 'title', 'targetMuscles', 'zoneId', 'zoneName', 'trainerId', 'trainerName'
+          ])
+        ))
+      );
+
+      allow delete: if isAdminOrOwner();
     }
 
-    // Payments
+    // ==========================================
+    // 10. WORKOUT OVERRIDES
+    // ==========================================
+    match /workout_overrides/{overrideId} {
+      allow read: if signedIn() && (
+        isStaff() || 
+        resource.data.memberId == myUid()
+      );
+      allow create: if isStaff();
+      allow update, delete: if isAdminOrOwner();
+    }
+
+    // ==========================================
+    // 11. FINANCIAL PAYMENTS (Immutable)
+    // ==========================================
     match /payments/{paymentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdminOrOwner();
+      allow read: if signedIn() && (
+        isAdminOrOwner() || 
+        resource.data.memberId == myUid()
+      );
+      allow create: if isBootstrap() || isAdminOrOwner();
+      allow update, delete: if false;
     }
 
-    // Progress and PRs
+    // ==========================================
+    // 12. PERSONAL RECORDS (PRs)
+    // ==========================================
     match /personal_records/{prId} {
-      allow read: if isAuthenticated();
-      allow write: if isStaff();
-    }
-    
-    match /progress_records/{recId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read: if signedIn() && (
+        isStaff() || 
+        resource.data.memberId == myUid()
+      );
+      allow create, update: if isBootstrap() || isStaff();
+      allow delete: if isAdminOrOwner();
     }
 
-    // Notifications
+    // ==========================================
+    // 13. NOTIFICATIONS
+    // ==========================================
     match /notifications/{notifId} {
-      allow read: if isAuthenticated();
+      allow read: if signedIn() && (
+        resource.data.userId == myUid() || 
+        resource.data.memberId == myUid() ||
+        isStaff()
+      );
       allow write: if isStaff();
     }
 
-    // Audit logs
+    // ==========================================
+    // 14. AUDIT LOGS (Append-Only)
+    // ==========================================
     match /audit_logs/{logId} {
       allow read: if isAdminOrOwner();
-      allow write: if isAuthenticated();
+      allow create: if isBootstrap() || isStaff();
+      allow update, delete: if false;
+    }
+
+    // ==========================================
+    // 15. DEFAULT DENY CATCH-ALL
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

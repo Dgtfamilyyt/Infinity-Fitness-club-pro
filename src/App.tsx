@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { UserRole, UserProfile, MembershipPlan } from './types';
 import { dataService } from './services/dataService';
+import { attendanceService } from './services/attendanceService';
+import { generateCryptographicQrToken } from './services/qrService';
 import { 
   fetchUserProfile, 
   saveUserProfile, 
@@ -34,6 +36,9 @@ export default function App() {
   const [dataVersion, setDataVersion] = useState(0);
 
   useEffect(() => {
+    // Initialize Firestore Attendance system & real-time listeners
+    attendanceService.initializeAttendanceSystem();
+
     return dataService.subscribe(() => {
       setDataVersion(v => v + 1);
     });
@@ -103,6 +108,7 @@ export default function App() {
 
       if (!authUser) {
         // No active session
+        dataService.syncForUser(null);
         setCurrentUser(null);
         setAccountStatus('OK');
         setAuthLoading(false);
@@ -116,16 +122,16 @@ export default function App() {
         return;
       }
 
-      // User is authenticated: resolve profile
+      // User is authenticated: resolve profile strictly from Firestore
       const userEmail = (authUser.email || '').toLowerCase().trim();
 
       try {
         // 1. Check Firestore by UID
         let profile = await fetchUserProfile(authUser.uid);
 
-        // 2. If not found in Firestore, check in DataService (which has pre-seeded staff/members)
-        if (!profile) {
-          const matched = dataService.findProfileByEmail(userEmail) || dataService.findProfileByUid(authUser.uid);
+        // 2. If not found by UID, check if reception/admin pre-created a profile matching this verified email
+        if (!profile && userEmail) {
+          const matched = dataService.findProfileByEmail(userEmail);
           if (matched) {
             profile = { ...matched, uid: authUser.uid, id: authUser.uid };
             dataService.upsertProfile(profile);
@@ -133,56 +139,9 @@ export default function App() {
           }
         }
 
-        // 3. If STILL not found: Check if this is an authorized staff login or new member
-        if (!profile && userEmail) {
-          const isStaffIntent = authUser.role === 'trainer' || authUser.role === 'admin' || authUser.role === 'owner';
-          if (isStaffIntent) {
-            const newStaff: UserProfile = {
-              id: authUser.uid,
-              uid: authUser.uid,
-              fullName: authUser.displayName || 'Operations Staff',
-              email: userEmail,
-              phone: '+91 98112 00000',
-              role: authUser.role || 'admin',
-              isActive: true,
-              fitnessGoal: 'Operations Management & Member Care',
-              createdAt: new Date().toISOString()
-            };
-            dataService.upsertProfile(newStaff);
-            await saveUserProfile(newStaff).catch(() => {});
-            profile = newStaff;
-          } else {
-            // Auto-provision as new member
-            const newAthlete: UserProfile = {
-              id: authUser.uid,
-              uid: authUser.uid,
-              memberId: 'IFC-' + Math.floor(1000 + Math.random() * 9000),
-              fullName: authUser.displayName || userEmail.split('@')[0],
-              email: userEmail,
-              phone: '+91 98000 00000',
-              role: 'member',
-              status: 'ACTIVE',
-              isActive: true,
-              membershipPlanId: 'quarterly-strength',
-              planName: 'Quarterly Strength Periodization',
-              membershipStart: new Date().toISOString().split('T')[0],
-              membershipExpiry: '2027-01-01',
-              attendanceStreak: 1,
-              workoutStreak: 1,
-              assignedTrainerId: 'trainer-rahul',
-              assignedTrainerName: 'Rahul Sharma',
-              fitnessGoal: 'Muscle Hypertrophy & Floor Discipline',
-              qrToken: 'QR-IFC-' + authUser.uid.substring(0, 6).toUpperCase(),
-              createdAt: new Date().toISOString()
-            };
-            dataService.upsertProfile(newAthlete);
-            await saveUserProfile(newAthlete).catch(() => {});
-            profile = newAthlete;
-          }
-        }
-
+        // 3. Strict Verification: Do NOT auto-provision staff or active paid members
         if (!profile) {
-          // Unconfigured user
+          dataService.syncForUser(null);
           setCurrentUser(null);
           setAccountStatus('UNCONFIGURED');
           setAuthLoading(false);
@@ -190,17 +149,19 @@ export default function App() {
         }
 
         if (profile.isActive === false) {
+          dataService.syncForUser(null);
           setCurrentUser(profile);
           setAccountStatus('INACTIVE');
           setAuthLoading(false);
           return;
         }
 
-        // Valid active profile
+        // Valid active profile - dynamically bind role-scoped Firestore subscriptions
+        dataService.syncForUser(profile);
         setCurrentUser(profile);
         setAccountStatus('OK');
 
-        // Route resolution based on role
+        // Route resolution based on role clearance
         if (profile.role === 'member') {
           // Member trying to access staff portal
           setRoute(prev => {
@@ -239,6 +200,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       setAuthLoading(true);
+      dataService.syncForUser(null);
       await logoutUser();
       setCurrentUser(null);
       setAccountStatus('OK');

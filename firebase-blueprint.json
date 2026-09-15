@@ -79,6 +79,20 @@
       },
       "required": ["name", "price", "duration_months"]
     },
+    "qr_tokens": {
+      "title": "QR Tokens",
+      "description": "Cryptographically hashed QR access tokens",
+      "type": "object",
+      "properties": {
+        "member_uid": { "type": "string" },
+        "gym_id": { "type": "string" },
+        "active": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "revoked_at": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "required": ["member_uid", "active"]
+    },
     "active_gym_sessions": {
       "title": "Active Gym Sessions",
       "description": "Real-time members currently inside gym",
