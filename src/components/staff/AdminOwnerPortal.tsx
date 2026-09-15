@@ -572,6 +572,32 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
               />
             </div>
 
+            <div>
+              <label className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                Landmark & Corridor:
+              </label>
+              <input
+                type="text"
+                value={cmsForm.landmark || ''}
+                onChange={(e) => setCmsForm({ ...cmsForm, landmark: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                placeholder="Upstairs Union Bank of India, Avinashi Road"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
+                Google Maps Link:
+              </label>
+              <input
+                type="text"
+                value={cmsForm.googleMapsUrl || ''}
+                onChange={(e) => setCmsForm({ ...cmsForm, googleMapsUrl: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                placeholder="https://maps.app.goo.gl/Xyt9iQEcfS67D6K5A"
+              />
+            </div>
+
             <div className="sm:col-span-2 pt-2">
               <button
                 type="submit"

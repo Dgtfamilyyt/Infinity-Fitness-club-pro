@@ -6,10 +6,12 @@ export type ZoneStatus = 'AVAILABLE' | 'BUSY' | 'FULL';
 
 export interface UserProfile {
   id: string;
+  uid?: string;
   email: string;
   fullName: string;
   phone?: string;
   role: UserRole;
+  isActive: boolean;
   avatarUrl?: string;
   memberId?: string; // e.g. IFC-1024
   qrToken?: string;  // Opaque secure token e.g. IFC_SEC_8f93...
@@ -152,10 +154,26 @@ export interface GymSettings {
   tagline: string;
   supportingConcept: string;
   phone: string;
+  altPhone?: string;
   whatsapp: string;
   email: string;
   address: string;
+  landmark?: string;
+  area?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
+  googleMapsUrl?: string;
+  googleRating?: number;
+  googleReviewCount?: number;
   openingHours: string;
+  morningHours?: string;
+  eveningHours?: string;
+  sundayHours?: string;
   announcement: string;
   currency: string;
   timezone: string;

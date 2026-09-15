@@ -1,17 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserRole, UserProfile, MembershipPlan } from './types';
 import { dataService } from './services/dataService';
-import { signInWithGoogle, logoutUser, auth } from './lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { 
+  fetchUserProfile, 
+  saveUserProfile, 
+  logoutUser,
+  subscribeToAuth,
+  AppAuthUser
+} from './lib/firebase';
 import { Navbar } from './components/layout/Navbar';
 import { PublicLanding } from './components/member/PublicLanding';
 import { MemberDashboard } from './components/member/MemberDashboard';
+import { MemberLogin } from './components/auth/MemberLogin';
+import { StaffLogin } from './components/auth/StaffLogin';
+import { StaffLayout } from './components/staff/StaffLayout';
 import { TrainerPortal } from './components/staff/TrainerPortal';
 import { ReceptionDesk } from './components/staff/ReceptionDesk';
 import { AdminOwnerPortal } from './components/staff/AdminOwnerPortal';
+import { 
+  ShieldAlert, 
+  Loader2, 
+  LogOut, 
+  ArrowLeft, 
+  CheckCircle2, 
+  Lock 
+} from 'lucide-react';
+
+type AppRoute = 'HOME' | 'MEMBER_LOGIN' | 'STAFF_LOGIN' | 'MEMBER_DASHBOARD' | 'STAFF_PORTAL';
 
 export default function App() {
-  // Data subscriptions
+  // Real-time data sync from DataService
   const [dataVersion, setDataVersion] = useState(0);
 
   useEffect(() => {
@@ -32,150 +50,516 @@ export default function App() {
   const attendanceLogs = dataService.getAttendanceLogs();
   const auditLogs = dataService.getAuditLogs();
 
-  // Navigation & Ecosystem Mode
-  const [appMode, setAppMode] = useState<'MEMBER' | 'STAFF'>('MEMBER');
-  const [memberViewMode, setMemberViewMode] = useState<'LANDING' | 'DASHBOARD'>('LANDING');
+  // Navigation State & Route Management
+  const [route, setRoute] = useState<AppRoute>('HOME');
   const [staffSubView, setStaffSubView] = useState<'TRAINER' | 'RECEPTION' | 'ADMIN'>('TRAINER');
 
-  // Active Current User / Persona
-  const [currentUser, setCurrentUser] = useState<UserProfile>(members[0] || {} as any);
-  const [currentRole, setCurrentRole] = useState<UserRole>('member');
+  // Auth State
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [accountStatus, setAccountStatus] = useState<'OK' | 'UNCONFIGURED' | 'DENIED' | 'INACTIVE'>('OK');
+  const [denialMessage, setDenialMessage] = useState<string>('');
 
-  // Listen to Firebase Auth
+  // Initial Route Check from URL pathname or hash
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      if (fbUser && fbUser.email) {
-        // Look up member or create
-        const matched = members.find(m => m.email.toLowerCase() === fbUser.email?.toLowerCase());
-        if (matched) {
-          setCurrentUser(matched);
-          setCurrentRole(matched.role);
-          setMemberViewMode('DASHBOARD');
-        } else {
-          // Register as active member
-          const newMember = dataService.addMember({
-            fullName: fbUser.displayName || 'Google Member',
-            email: fbUser.email,
-            status: 'ACTIVE'
-          });
-          setCurrentUser(newMember);
-          setCurrentRole('member');
-          setMemberViewMode('DASHBOARD');
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+
+    if (path.includes('/staff/login') || hash.includes('staff/login') || hash.includes('staff-login')) {
+      setRoute('STAFF_LOGIN');
+    } else if (path.includes('/login') || hash.includes('login')) {
+      setRoute('MEMBER_LOGIN');
+    } else if (path.includes('/staff') || hash.includes('staff')) {
+      setRoute('STAFF_PORTAL');
+    } else if (path.includes('/dashboard') || hash.includes('dashboard')) {
+      setRoute('MEMBER_DASHBOARD');
+    }
+  }, []);
+
+  // Sync route with URL history
+  const navigateTo = useCallback((targetRoute: AppRoute) => {
+    setRoute(targetRoute);
+    setAccountStatus('OK');
+    setDenialMessage('');
+
+    let path = '/';
+    if (targetRoute === 'MEMBER_LOGIN') path = '/login';
+    else if (targetRoute === 'STAFF_LOGIN') path = '/staff/login';
+    else if (targetRoute === 'MEMBER_DASHBOARD') path = '/dashboard';
+    else if (targetRoute === 'STAFF_PORTAL') path = '/staff';
+
+    try {
+      window.history.pushState(null, '', path);
+    } catch {
+      // In restricted iframe environments pushState might be restricted
+    }
+  }, []);
+
+  // Listen to Auth state (Firebase + fallback session)
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth(async (authUser: AppAuthUser | null) => {
+      setAuthLoading(true);
+
+      if (!authUser) {
+        // No active session
+        setCurrentUser(null);
+        setAccountStatus('OK');
+        setAuthLoading(false);
+
+        // If currently in a protected route, redirect to the corresponding login
+        setRoute(prev => {
+          if (prev === 'MEMBER_DASHBOARD') return 'MEMBER_LOGIN';
+          if (prev === 'STAFF_PORTAL') return 'STAFF_LOGIN';
+          return prev;
+        });
+        return;
+      }
+
+      // User is authenticated: resolve profile
+      const userEmail = (authUser.email || '').toLowerCase().trim();
+
+      try {
+        // 1. Check Firestore by UID
+        let profile = await fetchUserProfile(authUser.uid);
+
+        // 2. If not found in Firestore, check in DataService (which has pre-seeded staff/members)
+        if (!profile) {
+          const matched = dataService.findProfileByEmail(userEmail) || dataService.findProfileByUid(authUser.uid);
+          if (matched) {
+            profile = { ...matched, uid: authUser.uid, id: authUser.uid };
+            dataService.upsertProfile(profile);
+            await saveUserProfile(profile).catch(() => {});
+          }
         }
+
+        // 3. If STILL not found: Check if this is an authorized staff login or new member
+        if (!profile && userEmail) {
+          const isStaffIntent = authUser.role === 'trainer' || authUser.role === 'admin' || authUser.role === 'owner';
+          if (isStaffIntent) {
+            const newStaff: UserProfile = {
+              id: authUser.uid,
+              uid: authUser.uid,
+              fullName: authUser.displayName || 'Operations Staff',
+              email: userEmail,
+              phone: '+91 98112 00000',
+              role: authUser.role || 'admin',
+              isActive: true,
+              fitnessGoal: 'Operations Management & Member Care',
+              createdAt: new Date().toISOString()
+            };
+            dataService.upsertProfile(newStaff);
+            await saveUserProfile(newStaff).catch(() => {});
+            profile = newStaff;
+          } else {
+            // Auto-provision as new member
+            const newAthlete: UserProfile = {
+              id: authUser.uid,
+              uid: authUser.uid,
+              memberId: 'IFC-' + Math.floor(1000 + Math.random() * 9000),
+              fullName: authUser.displayName || userEmail.split('@')[0],
+              email: userEmail,
+              phone: '+91 98000 00000',
+              role: 'member',
+              status: 'ACTIVE',
+              isActive: true,
+              membershipPlanId: 'quarterly-strength',
+              planName: 'Quarterly Strength Periodization',
+              membershipStart: new Date().toISOString().split('T')[0],
+              membershipExpiry: '2027-01-01',
+              attendanceStreak: 1,
+              workoutStreak: 1,
+              assignedTrainerId: 'trainer-rahul',
+              assignedTrainerName: 'Rahul Sharma',
+              fitnessGoal: 'Muscle Hypertrophy & Floor Discipline',
+              qrToken: 'QR-IFC-' + authUser.uid.substring(0, 6).toUpperCase(),
+              createdAt: new Date().toISOString()
+            };
+            dataService.upsertProfile(newAthlete);
+            await saveUserProfile(newAthlete).catch(() => {});
+            profile = newAthlete;
+          }
+        }
+
+        if (!profile) {
+          // Unconfigured user
+          setCurrentUser(null);
+          setAccountStatus('UNCONFIGURED');
+          setAuthLoading(false);
+          return;
+        }
+
+        if (profile.isActive === false) {
+          setCurrentUser(profile);
+          setAccountStatus('INACTIVE');
+          setAuthLoading(false);
+          return;
+        }
+
+        // Valid active profile
+        setCurrentUser(profile);
+        setAccountStatus('OK');
+
+        // Route resolution based on role
+        if (profile.role === 'member') {
+          // Member trying to access staff portal
+          setRoute(prev => {
+            if (prev === 'STAFF_PORTAL' || prev === 'STAFF_LOGIN') {
+              setAccountStatus('DENIED');
+              setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance. Please use the Athlete Member portal.');
+              return 'STAFF_LOGIN';
+            }
+            return prev === 'HOME' ? 'HOME' : 'MEMBER_DASHBOARD';
+          });
+        } else {
+          // Staff roles: trainer, admin, owner
+          if (profile.role === 'trainer') setStaffSubView('TRAINER');
+          else if (profile.role === 'admin') setStaffSubView('RECEPTION');
+          else if (profile.role === 'owner') setStaffSubView('ADMIN');
+
+          setRoute(prev => {
+            if (prev === 'MEMBER_DASHBOARD' || prev === 'MEMBER_LOGIN') {
+              return 'STAFF_PORTAL';
+            }
+            if (prev === 'STAFF_LOGIN') return 'STAFF_PORTAL';
+            return prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL';
+          });
+        }
+      } catch (err) {
+        console.error('Error resolving user profile:', err);
+        setAccountStatus('UNCONFIGURED');
+      } finally {
+        setAuthLoading(false);
       }
     });
-    return () => unsub();
-  }, [members]);
 
-  const handleGoogleLogin = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (e) {
-      console.error('Google Sign-In failed:', e);
-    }
-  };
+    return () => unsubscribe();
+  }, []);
 
   const handleLogout = async () => {
     try {
+      setAuthLoading(true);
       await logoutUser();
-      setMemberViewMode('LANDING');
-    } catch (e) {
-      console.error('Logout error:', e);
+      setCurrentUser(null);
+      setAccountStatus('OK');
+      setDenialMessage('');
+      
+      // Route after logout
+      if (route === 'STAFF_PORTAL' || route === 'STAFF_LOGIN') {
+        navigateTo('STAFF_LOGIN');
+      } else {
+        navigateTo('MEMBER_LOGIN');
+      }
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
-  const handleJoinClick = (selectedPlan?: MembershipPlan) => {
-    // Open member view or auto-enroll
-    setAppMode('MEMBER');
-    setMemberViewMode('DASHBOARD');
-  };
+  // 1. Initial Session Loading Screen (Zero flicker)
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="relative">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-2xl animate-pulse">
+            ∞
+          </div>
+          <div className="absolute -inset-2 rounded-3xl bg-emerald-500/5 blur-xl -z-10" />
+        </div>
+        <h1 className="mt-6 text-xl font-black uppercase tracking-wider text-white">
+          {settings.name}
+        </h1>
+        <p className="mt-1 text-xs font-mono text-emerald-400 tracking-widest uppercase">
+          Initializing Secure Session...
+        </p>
+        <div className="mt-6 flex items-center gap-2 text-zinc-500 text-xs">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+          <span>Verifying authentication & security permissions</span>
+        </div>
+      </div>
+    );
+  }
 
+  // 2. Unconfigured Account Screen
+  if (accountStatus === 'UNCONFIGURED') {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#121214] border border-zinc-800 shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h2 className="mt-5 text-xl font-black uppercase text-white tracking-tight">
+            ACCOUNT NOT CONFIGURED
+          </h2>
+          <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+            Your authenticated Google account does not have an active athlete or staff profile registered in the Infinity Fitness Club database.
+          </p>
+          <p className="mt-3 text-xs text-zinc-500">
+            Please contact the gym reception or front desk staff to link your membership ID.
+          </p>
+          <div className="mt-6 pt-6 border-t border-zinc-800 flex gap-3">
+            <button
+              onClick={() => navigateTo('HOME')}
+              className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-wider transition"
+            >
+              Public Home
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex-1 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold uppercase tracking-wider transition flex items-center justify-center gap-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Deactivated / Inactive Account Screen
+  if (accountStatus === 'INACTIVE') {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#121214] border border-zinc-800 shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center mx-auto">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="mt-5 text-xl font-black uppercase text-white tracking-tight">
+            ACCOUNT SUSPENDED OR INACTIVE
+          </h2>
+          <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+            Your membership or staff profile has been deactivated by administration.
+          </p>
+          <div className="mt-6 pt-6 border-t border-zinc-800 flex justify-center">
+            <button
+              onClick={handleLogout}
+              className="px-6 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold uppercase tracking-wider transition"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Access Denied Screen (e.g. Member attempting to open staff route)
+  if (accountStatus === 'DENIED') {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#121214] border border-red-500/30 shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h2 className="mt-5 text-xl font-black uppercase text-red-400 tracking-tight">
+            ACCESS DENIED
+          </h2>
+          <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
+            {denialMessage || 'You do not have the required role permissions to view this secure portal.'}
+          </p>
+          <div className="mt-6 pt-6 border-t border-zinc-800 flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => navigateTo('MEMBER_DASHBOARD')}
+              className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold uppercase tracking-wider transition"
+            >
+              Go to Member Portal
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 text-xs font-bold uppercase tracking-wider transition"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. Dedicated Member Login Page
+  if (route === 'MEMBER_LOGIN') {
+    return (
+      <MemberLogin
+        settings={settings}
+        onSuccess={() => {
+          navigateTo('MEMBER_DASHBOARD');
+        }}
+        onNavigateHome={() => navigateTo('HOME')}
+        onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
+      />
+    );
+  }
+
+  // 6. Dedicated Staff Login Page
+  if (route === 'STAFF_LOGIN') {
+    return (
+      <StaffLogin
+        settings={settings}
+        onSuccess={() => {
+          navigateTo('STAFF_PORTAL');
+        }}
+        onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
+        onNavigateHome={() => navigateTo('HOME')}
+      />
+    );
+  }
+
+  // 7. Protected Staff Portal (Strict Role Enforced)
+  if (route === 'STAFF_PORTAL') {
+    // Unauthenticated staff redirect
+    if (!currentUser) {
+      return (
+        <StaffLogin
+          settings={settings}
+          onSuccess={() => navigateTo('STAFF_PORTAL')}
+          onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
+          onNavigateHome={() => navigateTo('HOME')}
+        />
+      );
+    }
+
+    // Role check: members are not permitted
+    if (currentUser.role === 'member') {
+      return (
+        <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 text-center">
+          <div className="max-w-md p-8 rounded-3xl bg-[#121214] border border-red-500/30">
+            <ShieldAlert className="w-10 h-10 text-red-400 mx-auto" />
+            <h2 className="text-xl font-bold text-white uppercase mt-4">Staff Clearance Required</h2>
+            <p className="text-xs text-zinc-400 mt-2">
+              Athletes and members do not have staff credentials. Please access your workout through the Member Portal.
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button
+                onClick={() => navigateTo('MEMBER_DASHBOARD')}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500 text-black font-bold text-xs uppercase"
+              >
+                Go to Member Dashboard
+              </button>
+              <button
+                onClick={handleLogout}
+                className="px-5 py-2.5 rounded-xl bg-zinc-900 text-zinc-400 text-xs font-bold uppercase"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Role-based staff view with desktop sidebar and mobile drawer
+    return (
+      <StaffLayout
+        settings={settings}
+        staffUser={currentUser}
+        activeView={staffSubView}
+        setActiveView={(v) => {
+          // Gating: only owners can view ADMIN
+          if (v === 'ADMIN' && currentUser.role !== 'owner') {
+            alert('Restricted: Club Owner permissions required.');
+            return;
+          }
+          setStaffSubView(v);
+        }}
+        onLogout={handleLogout}
+      >
+        {staffSubView === 'TRAINER' && (
+          <TrainerPortal
+            currentTrainer={currentUser.role === 'trainer' ? currentUser : trainers[0]}
+            zones={zones}
+            activeSessions={activeSessions}
+            members={members}
+            workout={workout}
+          />
+        )}
+
+        {staffSubView === 'RECEPTION' && (
+          <ReceptionDesk
+            zones={zones}
+            activeSessions={activeSessions}
+            members={members}
+            payments={payments}
+          />
+        )}
+
+        {staffSubView === 'ADMIN' && (
+          currentUser.role === 'owner' ? (
+            <AdminOwnerPortal
+              settings={settings}
+              zones={zones}
+              plans={plans}
+              members={members}
+              trainers={trainers}
+              activeSessions={activeSessions}
+              payments={payments}
+              auditLogs={auditLogs}
+            />
+          ) : (
+            <div className="p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-center">
+              <ShieldAlert className="w-8 h-8 text-amber-400 mx-auto" />
+              <h3 className="text-base font-bold text-white uppercase mt-2">Owner Clearance Required</h3>
+              <p className="text-xs text-zinc-400 mt-1">This section is restricted to the Gym Owner and Director.</p>
+            </div>
+          )
+        )}
+      </StaffLayout>
+    );
+  }
+
+  // 8. Protected Member Dashboard
+  if (route === 'MEMBER_DASHBOARD') {
+    if (!currentUser) {
+      return (
+        <MemberLogin
+          settings={settings}
+          onSuccess={() => navigateTo('MEMBER_DASHBOARD')}
+          onNavigateHome={() => navigateTo('HOME')}
+          onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
+        />
+      );
+    }
+
+    return (
+      <MemberDashboard
+        member={currentUser}
+        workout={workout}
+        zones={zones}
+        totalInside={activeSessions.length}
+        prs={prs}
+        attendanceLogs={attendanceLogs}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // 9. Public Landing Page (Home)
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
-      {/* Universal Ecosystem Navbar */}
       <Navbar
         settings={settings}
-        appMode={appMode}
-        setAppMode={setAppMode}
-        currentRole={currentRole}
-        setCurrentRole={setCurrentRole}
-        staffSubView={staffSubView}
-        setStaffSubView={setStaffSubView}
         currentUser={currentUser}
-        onSwitchUser={(u) => {
-          setCurrentUser(u);
-          setCurrentRole(u.role);
+        onNavigateHome={() => navigateTo('HOME')}
+        onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
+        onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
+        onNavigateDashboard={() => {
+          if (currentUser?.role === 'member') navigateTo('MEMBER_DASHBOARD');
+          else if (currentUser) navigateTo('STAFF_PORTAL');
+          else navigateTo('MEMBER_LOGIN');
         }}
-        members={members}
-        trainers={trainers}
-        onLoginWithGoogle={handleGoogleLogin}
         onLogout={handleLogout}
-        memberViewMode={memberViewMode}
-        setMemberViewMode={setMemberViewMode}
+        currentView={route}
       />
 
-      {/* Main Body View */}
       <main className="flex-1">
-        {/* APP 1: INFINITY MEMBER */}
-        {appMode === 'MEMBER' && (
-          <>
-            {memberViewMode === 'LANDING' ? (
-              <PublicLanding
-                settings={settings}
-                plans={plans}
-                trainers={trainers}
-                onJoinClick={handleJoinClick}
-                onLoginClick={() => setMemberViewMode('DASHBOARD')}
-              />
-            ) : (
-              <MemberDashboard
-                member={currentUser.role === 'member' ? currentUser : members[0]}
-                workout={workout}
-                zones={zones}
-                totalInside={activeSessions.length}
-                prs={prs}
-                attendanceLogs={attendanceLogs}
-              />
-            )}
-          </>
-        )}
-
-        {/* APP 2: INFINITY STAFF */}
-        {appMode === 'STAFF' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            {staffSubView === 'TRAINER' && (
-              <TrainerPortal
-                currentTrainer={trainers[0]}
-                zones={zones}
-                activeSessions={activeSessions}
-                members={members}
-                workout={workout}
-              />
-            )}
-
-            {staffSubView === 'RECEPTION' && (
-              <ReceptionDesk
-                zones={zones}
-                activeSessions={activeSessions}
-                members={members}
-                payments={payments}
-              />
-            )}
-
-            {staffSubView === 'ADMIN' && (
-              <AdminOwnerPortal
-                settings={settings}
-                zones={zones}
-                plans={plans}
-                members={members}
-                trainers={trainers}
-                activeSessions={activeSessions}
-                payments={payments}
-                auditLogs={auditLogs}
-              />
-            )}
-          </div>
-        )}
+        <PublicLanding
+          settings={settings}
+          plans={plans}
+          trainers={trainers}
+          onJoinClick={() => navigateTo('MEMBER_LOGIN')}
+          onLoginClick={() => navigateTo('MEMBER_LOGIN')}
+          onStaffLoginClick={() => navigateTo('STAFF_LOGIN')}
+        />
       </main>
     </div>
   );

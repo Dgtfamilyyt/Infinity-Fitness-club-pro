@@ -13,7 +13,11 @@ import {
   Calendar,
   AlertCircle,
   ShieldCheck,
-  ChevronRight
+  ChevronRight,
+  LogOut,
+  Home,
+  ShieldAlert,
+  ExternalLink
 } from 'lucide-react';
 import { UserProfile, WorkoutAssignment, GymZone, PersonalRecord, AttendanceRecord } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -27,6 +31,7 @@ interface MemberDashboardProps {
   totalInside: number;
   prs: PersonalRecord[];
   attendanceLogs: AttendanceRecord[];
+  onLogout?: () => void;
 }
 
 export const MemberDashboard: React.FC<MemberDashboardProps> = ({
@@ -35,10 +40,11 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
   zones,
   totalInside,
   prs,
-  attendanceLogs
+  attendanceLogs,
+  onLogout
 }) => {
   const [showQR, setShowQR] = useState(false);
-  const [activeTab, setActiveTab] = useState<'HOME' | 'WORKOUT' | 'PROGRESS' | 'ATTENDANCE'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'WORKOUT' | 'PROGRESS' | 'ATTENDANCE' | 'PROFILE'>('HOME');
 
   const handleToggleExercise = (exerciseId: string) => {
     dataService.toggleExerciseComplete(exerciseId);
@@ -48,51 +54,64 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
   const memberAttendance = attendanceLogs.filter(a => a.memberId === member.id);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 pb-24 md:pb-12">
+    <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 pb-28 md:pb-12">
       {/* Top Banner Bar */}
-      <div className="bg-[#121214] border-b border-zinc-800 px-4 sm:px-6 lg:px-8 py-4">
+      <div className="bg-[#121214] border-b border-zinc-800 px-4 sm:px-6 lg:px-8 py-3.5">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <span className="font-mono text-emerald-400 font-bold">{member.memberId}</span>
+              <span className="font-mono text-emerald-400 font-bold">{member.memberId || 'IFC-MEMBER'}</span>
               <span>•</span>
-              <span className="uppercase tracking-wider font-semibold text-zinc-300">{member.planName}</span>
+              <span className="uppercase tracking-wider font-semibold text-zinc-300">{member.planName || 'Active Tier'}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight uppercase mt-0.5">
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight uppercase mt-0.5">
               HELLO, {member.fullName.split(' ')[0]}
             </h1>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Attendance & Streak stats */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800">
               <Flame className="w-4 h-4 text-orange-400" />
               <div className="text-xs">
-                <span className="text-zinc-400">Streak:</span>{' '}
-                <strong className="text-white font-mono">{member.attendanceStreak || 0} Days</strong>
+                <span className="text-zinc-400 hidden sm:inline">Streak:</span>{' '}
+                <strong className="text-white font-mono">{member.attendanceStreak || 0}d</strong>
               </div>
             </div>
 
             {/* QR Check-In Pass Button */}
             <button
               onClick={() => setShowQR(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs tracking-wider uppercase transition shadow-lg shadow-emerald-500/10"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs tracking-wider uppercase transition shadow-lg shadow-emerald-500/10 min-h-[40px]"
             >
               <QrCode className="w-4 h-4" />
               <span>Digital Pass</span>
             </button>
+
+            {/* Logout Button */}
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-400 hover:text-white transition"
+                title="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Logout</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-zinc-800 pb-3 overflow-x-auto">
+        {/* Desktop Navigation Tabs */}
+        <div className="hidden md:flex items-center gap-2 border-b border-zinc-800 pb-3 overflow-x-auto">
           {[
             { id: 'HOME', label: 'Dashboard' },
             { id: 'WORKOUT', label: "Today's Workout" },
             { id: 'PROGRESS', label: 'PRs & Progress' },
-            { id: 'ATTENDANCE', label: 'Attendance' }
+            { id: 'ATTENDANCE', label: 'Attendance' },
+            { id: 'PROFILE', label: 'Athlete Profile' }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -456,6 +475,102 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
             </div>
           </div>
         )}
+
+        {/* TAB 5: ATHLETE PROFILE */}
+        {activeTab === 'PROFILE' && (
+          <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl space-y-6">
+            <div className="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-black text-xl">
+                  {member.fullName.charAt(0)}
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-white uppercase">{member.fullName}</h2>
+                  <p className="text-xs text-zinc-400 font-mono">{member.email}</p>
+                </div>
+              </div>
+
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="px-4 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition flex items-center gap-2 self-start sm:self-auto min-h-[44px]"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out of Club</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider block">Membership Plan</span>
+                <span className="text-white font-bold text-sm mt-1 block">{member.planName || 'Active Tier'}</span>
+                <span className="text-emerald-400 text-[11px] font-mono mt-0.5 block">Valid until {member.membershipExpiry || '2027-01-01'}</span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider block">Assigned Coach</span>
+                <span className="text-white font-bold text-sm mt-1 block">{member.assignedTrainerName || 'Rahul Sharma'}</span>
+                <span className="text-zinc-400 text-[11px] mt-0.5 block">CSCS Certified Strength Specialist</span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider block">Membership Badge ID</span>
+                <span className="text-emerald-400 font-mono font-bold text-sm mt-1 block">{member.memberId || 'IFC-1001'}</span>
+                <span className="text-zinc-400 text-[11px] font-mono mt-0.5 block">Status: {member.status || 'ACTIVE'}</span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 sm:col-span-2">
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider block">Physical Restrictions & Biomechanics Notes</span>
+                <div className="mt-1 flex items-start gap-2 text-zinc-300">
+                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>{member.restrictions && member.restrictions !== 'None' ? member.restrictions : 'No joint impingements or clinical restrictions logged.'}</span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider block">Emergency Contact</span>
+                <span className="text-white font-mono mt-1 block">{member.emergencyContact || '+91 98200 00000'}</span>
+              </div>
+
+              {/* Home Club Google Maps Location */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-zinc-900 to-zinc-950 border border-emerald-500/20 sm:col-span-2 lg:col-span-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-bold text-sm">Infinity Fitness Club</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                        4.9 ★ Neelambur
+                      </span>
+                    </div>
+                    <p className="text-zinc-400 text-xs mt-0.5">
+                      No. 1/215, Upstairs Union Bank of India, Avinashi Rd, Neelambur, Coimbatore - 641062
+                    </p>
+                    <div className="flex items-center gap-4 text-[11px] text-zinc-500 mt-1 font-mono">
+                      <span>Morning: 5:30 AM – 10:00 AM</span>
+                      <span>•</span>
+                      <span>Evening: 5:00 PM – 9:30 PM</span>
+                    </div>
+                  </div>
+                </div>
+
+                <a
+                  href="https://maps.app.goo.gl/Xyt9iQEcfS67D6K5A"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  referrerPolicy="no-referrer"
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-wider transition flex items-center gap-1.5 shrink-0 shadow-md shadow-emerald-500/10"
+                >
+                  <span>Google Maps Directions</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* QR Pass Modal */}
@@ -464,6 +579,36 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         isOpen={showQR}
         onClose={() => setShowQR(false)}
       />
+
+      {/* Mobile App Bottom Navigation (Fixed, reachable, min 44px touch targets) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#121214]/95 backdrop-blur-lg border-t border-zinc-800 px-2 py-1 flex items-center justify-around shadow-2xl">
+        {[
+          { id: 'HOME', label: 'Home', icon: Home },
+          { id: 'WORKOUT', label: 'Workout', icon: Dumbbell },
+          { id: 'PROGRESS', label: 'Progress', icon: Trophy },
+          { id: 'ATTENDANCE', label: 'Logs', icon: Calendar },
+          { id: 'PROFILE', label: 'Profile', icon: User }
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`flex-1 min-h-[48px] py-1 flex flex-col items-center justify-center rounded-xl transition ${
+                isActive
+                  ? 'text-emerald-400 font-bold'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <Icon className={`w-5 h-5 ${isActive ? 'text-emerald-400 stroke-[2.5]' : 'stroke-[1.75]'}`} />
+              <span className="text-[10px] tracking-tight uppercase mt-0.5 font-medium">
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };

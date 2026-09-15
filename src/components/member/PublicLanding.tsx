@@ -16,6 +16,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { GymSettings, MembershipPlan, UserProfile } from '../../types';
+import { GoogleMapsLocation } from '../common/GoogleMapsLocation';
 
 interface PublicLandingProps {
   settings: GymSettings;
@@ -23,6 +24,7 @@ interface PublicLandingProps {
   trainers: UserProfile[];
   onJoinClick: (plan?: MembershipPlan) => void;
   onLoginClick: () => void;
+  onStaffLoginClick?: () => void;
 }
 
 export const PublicLanding: React.FC<PublicLandingProps> = ({
@@ -30,7 +32,8 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
   plans,
   trainers,
   onJoinClick,
-  onLoginClick
+  onLoginClick,
+  onStaffLoginClick
 }) => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
@@ -302,6 +305,24 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
         </div>
       </section>
 
+      {/* Club Location & Google Maps Showcase */}
+      <section id="location" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-zinc-900">
+        <div className="text-center max-w-3xl mx-auto mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-3">
+            <MapPin className="w-3.5 h-3.5" />
+            Training Facility & Coordinates
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-black uppercase text-white tracking-tight">
+            Find Us in Neelambur, Coimbatore
+          </h2>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-2">
+            Located right on Avinashi Road above Union Bank of India. Step into an air-purified, biomechanically equipped strength facility designed for focused athletes.
+          </p>
+        </div>
+
+        <GoogleMapsLocation settings={settings} />
+      </section>
+
       {/* FAQ Section */}
       <section className="py-20 bg-[#0d0d10] border-t border-zinc-900">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -356,15 +377,43 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
             <div className="font-bold uppercase tracking-wider text-white text-xs mb-2">Location & Contact</div>
             <div className="flex items-start gap-2">
               <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              <span>{settings.address}</span>
+              <div>
+                <span>{settings.address}</span>
+                <div className="mt-1">
+                  <a
+                    href={settings.googleMapsUrl || 'https://maps.app.goo.gl/Xyt9iQEcfS67D6K5A'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    referrerPolicy="no-referrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition"
+                  >
+                    <span>View on Google Maps</span>
+                    <span className="text-[10px]">↗</span>
+                  </a>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pt-1">
               <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{settings.phone}</span>
+              <div className="flex items-center gap-2">
+                <a href={`tel:${settings.phone.replace(/\s+/g, '')}`} className="hover:text-emerald-400 transition">
+                  {settings.phone}
+                </a>
+                {settings.altPhone && (
+                  <>
+                    <span className="text-zinc-600">/</span>
+                    <a href={`tel:${settings.altPhone.replace(/\s+/g, '')}`} className="hover:text-emerald-400 transition">
+                      {settings.altPhone}
+                    </a>
+                  </>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{settings.email}</span>
+              <a href={`mailto:${settings.email}`} className="hover:text-emerald-400 transition">
+                {settings.email}
+              </a>
             </div>
           </div>
         </div>
@@ -375,6 +424,14 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
             <button onClick={onLoginClick} className="hover:text-emerald-400 transition">
               Member Portal
             </button>
+            {onStaffLoginClick && (
+              <>
+                <span>•</span>
+                <button onClick={onStaffLoginClick} className="hover:text-emerald-400 transition">
+                  Staff Entrance
+                </button>
+              </>
+            )}
             <span>•</span>
             <a href="#plans" className="hover:text-emerald-400 transition">
               Memberships

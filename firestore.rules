@@ -1,79 +1,93 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    // Gym config & public CMS info
+    function getUserProfile() {
+      return get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data;
+    }
+    function isStaff() {
+      return isAuthenticated() && (getUserProfile().role in ['trainer', 'admin', 'owner']);
+    }
+    function isAdminOrOwner() {
+      return isAuthenticated() && (getUserProfile().role in ['admin', 'owner']);
+    }
+    function isOwner() {
+      return isAuthenticated() && (getUserProfile().role == 'owner');
+    }
+    function isOwnerOrSelf(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || isStaff());
+    }
+
+    // Public gym config & CMS info
     match /gyms/{gymId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAdminOrOwner();
     }
 
     // Gym zones (capacities, occupancy)
     match /gym_zones/{zoneId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isStaff();
     }
 
     // Membership plans
     match /membership_plans/{planId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAdminOrOwner();
     }
 
     // User profiles
     match /profiles/{userId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated() && isOwnerOrSelf(userId);
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdminOrOwner());
     }
 
     // Active gym sessions
     match /active_gym_sessions/{sessionId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
     }
 
     // Attendance records
     match /attendance_records/{recordId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
     }
 
     // Workout assignments
     match /workout_assignments/{assignmentId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isAuthenticated();
     }
 
     // Payments
     match /payments/{paymentId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAdminOrOwner();
     }
 
     // Progress and PRs
     match /personal_records/{prId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
     }
     
     match /progress_records/{recId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isAuthenticated();
     }
 
     // Notifications
     match /notifications/{notifId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
     }
 
     // Audit logs
     match /audit_logs/{logId} {
-      allow read: if true;
+      allow read: if isAdminOrOwner();
       allow write: if isAuthenticated();
     }
   }

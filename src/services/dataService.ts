@@ -15,6 +15,7 @@ import {
   INITIAL_ZONES,
   INITIAL_PLANS,
   INITIAL_TRAINERS,
+  INITIAL_STAFF,
   INITIAL_MEMBERS,
   INITIAL_ACTIVE_SESSIONS,
   INITIAL_TODAY_WORKOUT_ARUN,
@@ -23,6 +24,7 @@ import {
   INITIAL_ATTENDANCE_LOGS
 } from './seedData';
 import { evaluateWorkoutAssignment } from './workoutEngine';
+import { fetchUserProfile, saveUserProfile } from '../lib/firebase';
 
 const STORAGE_KEYS = {
   SETTINGS: 'ifc_gym_settings',
@@ -30,6 +32,7 @@ const STORAGE_KEYS = {
   PLANS: 'ifc_plans',
   MEMBERS: 'ifc_members',
   TRAINERS: 'ifc_trainers',
+  STAFF: 'ifc_staff',
   SESSIONS: 'ifc_active_sessions',
   WORKOUT: 'ifc_workout_arun',
   PAYMENTS: 'ifc_payments',
@@ -63,6 +66,7 @@ class DataService {
   private plans: MembershipPlan[] = loadStorage(STORAGE_KEYS.PLANS, INITIAL_PLANS);
   private members: UserProfile[] = loadStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
   private trainers: UserProfile[] = loadStorage(STORAGE_KEYS.TRAINERS, INITIAL_TRAINERS);
+  private staff: UserProfile[] = loadStorage(STORAGE_KEYS.STAFF, INITIAL_STAFF);
   private activeSessions: ActiveGymSession[] = loadStorage(STORAGE_KEYS.SESSIONS, INITIAL_ACTIVE_SESSIONS);
   private arunWorkout: WorkoutAssignment = loadStorage(STORAGE_KEYS.WORKOUT, INITIAL_TODAY_WORKOUT_ARUN);
   private payments: PaymentRecord[] = loadStorage(STORAGE_KEYS.PAYMENTS, INITIAL_PAYMENTS);
@@ -82,6 +86,18 @@ class DataService {
 
   private listeners: Set<() => void> = new Set();
 
+  constructor() {
+    // Automatically migrate old mock address to verified Google Maps real-world location
+    if (
+      !this.settings.googleMapsUrl || 
+      this.settings.address.includes('Zenith Boulevard') || 
+      !this.settings.coordinates
+    ) {
+      this.settings = { ...this.settings, ...INITIAL_GYM_SETTINGS };
+      saveStorage(STORAGE_KEYS.SETTINGS, this.settings);
+    }
+  }
+
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -97,6 +113,45 @@ class DataService {
   getPlans(): MembershipPlan[] { return this.plans; }
   getMembers(): UserProfile[] { return this.members; }
   getTrainers(): UserProfile[] { return this.trainers; }
+  getStaff(): UserProfile[] { return this.staff; }
+  getAllProfiles(): UserProfile[] { return [...this.members, ...this.trainers, ...this.staff]; }
+
+  findProfileByEmail(email: string): UserProfile | null {
+    if (!email) return null;
+    const lower = email.trim().toLowerCase();
+    return this.getAllProfiles().find(p => p.email.toLowerCase() === lower) || null;
+  }
+
+  findProfileByUid(uid: string): UserProfile | null {
+    if (!uid) return null;
+    return this.getAllProfiles().find(p => p.id === uid || p.uid === uid) || null;
+  }
+
+  upsertProfile(profile: UserProfile): void {
+    const listKey = profile.role === 'member' 
+      ? 'members' 
+      : profile.role === 'trainer' 
+      ? 'trainers' 
+      : 'staff';
+    const storageKey = profile.role === 'member'
+      ? STORAGE_KEYS.MEMBERS
+      : profile.role === 'trainer'
+      ? STORAGE_KEYS.TRAINERS
+      : STORAGE_KEYS.STAFF;
+
+    const list = this[listKey];
+    const idx = list.findIndex(p => p.id === profile.id || (profile.uid && p.uid === profile.uid) || p.email.toLowerCase() === profile.email.toLowerCase());
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...profile };
+    } else {
+      list.push(profile);
+    }
+    saveStorage(storageKey, list);
+    // Background sync to Firestore
+    saveUserProfile(profile).catch(() => {});
+    this.notify();
+  }
+
   getActiveSessions(): ActiveGymSession[] { return this.activeSessions; }
   getWorkoutAssignment(): WorkoutAssignment { return this.arunWorkout; }
   getPayments(): PaymentRecord[] { return this.payments; }
@@ -334,6 +389,7 @@ class DataService {
       fullName: memberData.fullName || 'New Member',
       phone: memberData.phone || '+91 98000 00000',
       role: 'member',
+      isActive: true,
       memberId: `IFC-${nextNum}`,
       qrToken: `IFC_TOKEN_SEC_${nextNum}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
       status: memberData.status || 'ACTIVE',
