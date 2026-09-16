@@ -18,6 +18,7 @@ import {
   Info
 } from 'lucide-react';
 import { UserProfile, WorkoutAssignment, AttendanceRecord, PersonalRecord, GymZone, ExerciseItem } from '../../types';
+import { triggerPrConfetti } from '../../utils/confetti';
 
 export interface MonthlyCalendarViewProps {
   member: UserProfile;
@@ -773,22 +774,34 @@ export const MonthlyCalendarView: React.FC<MonthlyCalendarViewProps> = ({
 
           {/* Personal Record Milestone Highlight on this day */}
           {selectedDay.personalRecord && (
-            <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex items-start gap-3">
-              <Trophy className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                  Strength Milestone Verified
-                </div>
-                <div className="text-sm font-black text-white mt-0.5">
-                  {selectedDay.personalRecord.exercise}: {selectedDay.personalRecord.weightKg} KG
-                </div>
-                <div className="text-xs text-zinc-400 mt-1 font-mono">
-                  {selectedDay.personalRecord.reps} reps • Improved by +{selectedDay.personalRecord.improvementPercentage}%
-                </div>
-                <div className="text-[10px] text-zinc-500 mt-1">
-                  Floor Verified by {selectedDay.personalRecord.verifiedBy}
+            <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <Trophy className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Strength Milestone Verified
+                  </div>
+                  <div className="text-sm font-black text-white mt-0.5">
+                    {selectedDay.personalRecord.exercise}: {selectedDay.personalRecord.weightKg} KG
+                  </div>
+                  <div className="text-xs text-zinc-400 mt-1 font-mono">
+                    {selectedDay.personalRecord.reps} reps • Improved by +{selectedDay.personalRecord.improvementPercentage}%
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    Floor Verified by {selectedDay.personalRecord.verifiedBy}
+                  </div>
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => triggerPrConfetti()}
+                title="Celebrate this PR!"
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 border border-amber-500/30 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 shrink-0"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Celebrate</span>
+              </button>
             </div>
           )}
 

@@ -6,6 +6,7 @@ import { attendanceService } from './services/attendanceService';
 import { generateCryptographicQrToken } from './services/qrService';
 import { 
   fetchUserProfile, 
+  fetchUserProfileByEmail,
   saveUserProfile, 
   logoutUser,
   subscribeToAuth,
@@ -133,23 +134,83 @@ export default function App() {
         // 1. Check Firestore by UID
         let profile = await fetchUserProfile(authUser.uid);
 
-        // 2. If not found by UID, check if reception/admin pre-created a profile matching this verified email
+        // 2. If not found by UID, check Firestore by email (handles pre-enrolled members & staff)
         if (!profile && userEmail) {
-          const matched = dataService.findProfileByEmail(userEmail);
-          if (matched) {
-            profile = { ...matched, uid: authUser.uid, id: authUser.uid };
+          profile = await fetchUserProfileByEmail(userEmail);
+          if (profile) {
+            profile = { ...profile, uid: authUser.uid, id: authUser.uid };
             dataService.upsertProfile(profile);
             await saveUserProfile(profile).catch(() => {});
+          } else {
+            // Check cache / seed data by email
+            const matched = dataService.findProfileByEmail(userEmail);
+            if (matched) {
+              profile = { ...matched, uid: authUser.uid, id: authUser.uid };
+              dataService.upsertProfile(profile);
+              await saveUserProfile(profile).catch(() => {});
+            }
           }
         }
 
-        // 3. Strict Verification: Do NOT auto-provision staff or active paid members
+        // 3. Trusted Bootstrap Provisioning for Club Owner
+        const isBootstrapOwner = (
+          userEmail === 'dgtfamilyyt8@gmail.com' ||
+          userEmail === 'owner@infinityfitnessclub.in'
+        );
+
+        if (!profile && isBootstrapOwner) {
+          profile = {
+            id: authUser.uid,
+            uid: authUser.uid,
+            email: userEmail,
+            fullName: userEmail.includes('dgtfamily') ? 'Karan Singhania (Club Owner)' : 'Club Owner',
+            role: 'owner',
+            isActive: true,
+            gymId: 'infinity-neelambur',
+            fitnessGoal: 'Club Founder & Managing Director',
+            phone: '+91 81898 51615',
+            avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+            createdAt: new Date().toISOString()
+          };
+          dataService.upsertProfile(profile);
+          await saveUserProfile(profile).catch(() => {});
+        }
+
+        // 4. If user was attempting staff login and has no staff profile, forbid creation
         if (!profile) {
-          dataService.syncForUser(null);
-          setCurrentUser(null);
-          setAccountStatus('UNCONFIGURED');
-          setAuthLoading(false);
-          return;
+          if (route === 'STAFF_LOGIN' || route === 'STAFF_PORTAL') {
+            dataService.syncForUser(null);
+            setCurrentUser(null);
+            setAccountStatus('DENIED');
+            setDenialMessage('Access Denied: This account is not registered as an authorized Infinity staff member or coach. Please contact the Club Owner.');
+            setAuthLoading(false);
+            return;
+          }
+
+          // New self-registered athlete on the Member Portal:
+          // Provision standard MEMBER account only (strictly role: 'member')
+          profile = {
+            id: authUser.uid,
+            uid: authUser.uid,
+            email: userEmail,
+            fullName: authUser.displayName || userEmail.split('@')[0] || 'Club Athlete',
+            role: 'member',
+            isActive: true,
+            status: 'ACTIVE',
+            gymId: 'infinity-neelambur',
+            memberId: `IFC-${Math.floor(1000 + Math.random() * 9000)}`,
+            membershipPlanId: 'plan-quarterly',
+            planName: 'Quarterly Transformation',
+            membershipStart: new Date().toISOString().split('T')[0],
+            membershipExpiry: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+            fitnessGoal: 'Hypertrophy & Strength',
+            attendanceStreak: 0,
+            workoutStreak: 0,
+            qrToken: `IFC1.${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`,
+            createdAt: new Date().toISOString()
+          };
+          dataService.upsertProfile(profile);
+          await saveUserProfile(profile).catch(() => {});
         }
 
         if (profile.isActive === false) {
@@ -477,6 +538,8 @@ export default function App() {
               plans={plans}
               members={members}
               trainers={trainers}
+              staff={dataService.getStaff()}
+              currentUser={currentUser}
               activeSessions={activeSessions}
               payments={payments}
               auditLogs={auditLogs}

@@ -30,6 +30,7 @@ import {
 } from '../../types';
 import { dataService } from '../../services/dataService';
 import { EditTrainerProfileModal } from './EditTrainerProfileModal';
+import { StaffManagementTab } from './StaffManagementTab';
 
 interface AdminOwnerPortalProps {
   settings: GymSettings;
@@ -37,6 +38,8 @@ interface AdminOwnerPortalProps {
   plans: MembershipPlan[];
   members: UserProfile[];
   trainers: UserProfile[];
+  staff?: UserProfile[];
+  currentUser?: UserProfile | null;
   activeSessions: ActiveGymSession[];
   payments: PaymentRecord[];
   auditLogs: AuditLog[];
@@ -48,11 +51,13 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
   plans,
   members,
   trainers,
+  staff,
+  currentUser,
   activeSessions,
   payments,
   auditLogs
 }) => {
-  const [activeTab, setActiveTab] = useState<'ANALYTICS' | 'MEMBERS' | 'TRAINERS' | 'PLANS' | 'ZONES' | 'CMS' | 'AUDIT'>('ANALYTICS');
+  const [activeTab, setActiveTab] = useState<'ANALYTICS' | 'MEMBERS' | 'STAFF' | 'TRAINERS' | 'PLANS' | 'ZONES' | 'CMS' | 'AUDIT'>('ANALYTICS');
   const [selectedTrainerForEdit, setSelectedTrainerForEdit] = useState<UserProfile | null>(null);
   const [memberFilter, setMemberFilter] = useState<'ALL' | 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'FROZEN' | 'TRIAL'>('ALL');
   const [memberSearch, setMemberSearch] = useState('');
@@ -153,6 +158,7 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
         {[
           { id: 'ANALYTICS', label: 'Executive Analytics', icon: Activity },
           { id: 'MEMBERS', label: `Athletes (${members.length})`, icon: Users },
+          { id: 'STAFF', label: `Staff & Roles (${(staff?.length || 0) + trainers.length})`, icon: ShieldCheck },
           { id: 'TRAINERS', label: `Floor Coaches (${trainers.length})`, icon: Dumbbell },
           { id: 'PLANS', label: 'Membership Plans', icon: CreditCard },
           { id: 'ZONES', label: 'Floor Zones & Capacities', icon: Layers },
@@ -347,6 +353,17 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB: STAFF & ROLE MANAGEMENT */}
+      {activeTab === 'STAFF' && (
+        <StaffManagementTab
+          staff={staff || dataService.getStaff()}
+          trainers={trainers}
+          members={members}
+          currentUser={currentUser || null}
+          onEditTrainer={(t) => setSelectedTrainerForEdit(t)}
+        />
       )}
 
       {/* TAB: FLOOR COACHES & TRAINERS */}

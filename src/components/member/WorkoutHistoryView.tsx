@@ -20,9 +20,13 @@ import {
   Zap,
   Activity,
   Check,
-  X
+  X,
+  Sparkles,
+  Bell
 } from 'lucide-react';
 import { UserProfile, WorkoutAssignment, AttendanceRecord, PersonalRecord } from '../../types';
+import { triggerPrConfetti } from '../../utils/confetti';
+import { notificationService } from '../../services/notificationService';
 
 export interface WorkoutHistoryViewProps {
   member: UserProfile;
@@ -424,11 +428,24 @@ export const WorkoutHistoryView: React.FC<WorkoutHistoryViewProps> = ({
                             <strong className="font-mono text-white">{relatedPR.weightKg} KG × {relatedPR.reps} reps</strong>
                           </div>
                         </div>
-                        {relatedPR.improvementPercentage && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold shrink-0">
-                            +{relatedPR.improvementPercentage}% Peak
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {relatedPR.improvementPercentage && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold shrink-0">
+                              +{relatedPR.improvementPercentage}% Peak
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerPrConfetti();
+                            }}
+                            title="Celebrate this PR!"
+                            className="p-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 transition active:scale-90"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -607,6 +624,25 @@ export const WorkoutHistoryView: React.FC<WorkoutHistoryViewProps> = ({
                   {currentWorkout.timeSlot || '6:00 PM – 7:00 PM'}
                 </div>
               </div>
+            </div>
+
+            {/* Session 1-Hour Reminder Notice */}
+            <div className="mt-4 p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-zinc-300">
+                <Bell className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  <strong>1-Hour Session Reminder:</strong> In-app alerts and push notifications are active for this scheduled slot.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => notificationService.triggerTestReminder(currentWorkout)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider transition active:scale-95 shrink-0 flex items-center gap-1"
+                title="Send test 1-hour workout reminder alert"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Test Alert</span>
+              </button>
             </div>
 
             {/* Interactive Exercise Checklist */}

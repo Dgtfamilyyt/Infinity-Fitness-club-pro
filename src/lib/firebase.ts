@@ -14,9 +14,16 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
+  initializeFirestore,
   doc, 
   getDoc, 
+  getDocFromServer,
   setDoc,
+  collection,
+  query,
+  where,
+  limit,
+  getDocs,
   serverTimestamp
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -38,9 +45,36 @@ const app = getApps().length === 0
     }) 
   : getApp();
 
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore with robust long-polling to prevent 10s backend connection timeouts in proxied / iframe environments
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+      },
+      firebaseConfig.firestoreDatabaseId || undefined
+    );
+  } catch {
+    return firebaseConfig.firestoreDatabaseId
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+  }
+})();
+
+// Validate Connection to Firestore (Firebase Integration Skill constraint)
+async function testFirestoreConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('Firestore Notice: The client is operating in offline mode.');
+    }
+  }
+}
+if (typeof window !== 'undefined') {
+  testFirestoreConnection();
+}
 
 export const auth = getAuth(app);
 
@@ -256,6 +290,27 @@ export const fetchUserProfile = async (uid: string): Promise<UserProfile | null>
     return null;
   } catch (err) {
     console.warn('Profile fetch notice (falling back to cache):', err);
+    return null;
+  }
+};
+
+export const fetchUserProfileByEmail = async (email: string): Promise<UserProfile | null> => {
+  if (!email) return null;
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const q = query(
+      collection(db, 'profiles'),
+      where('email', '==', cleanEmail),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const firstDoc = snap.docs[0];
+      return { ...firstDoc.data(), id: firstDoc.id } as UserProfile;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Profile fetch by email notice:', err);
     return null;
   }
 };

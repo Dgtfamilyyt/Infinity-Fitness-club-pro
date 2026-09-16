@@ -1,5 +1,6 @@
 import { 
   UserProfile, 
+  UserRole,
   GymZone, 
   MembershipPlan, 
   WorkoutAssignment, 
@@ -34,6 +35,7 @@ import { workoutService } from './workoutService';
 import { progressService } from './progressService';
 import { auditService } from './auditService';
 import { attendanceService } from './attendanceService';
+import { staffService } from './staffService';
 
 /**
  * DataService acts as the reactive client-side cache and coordinator.
@@ -49,6 +51,8 @@ class DataService {
   private staff: UserProfile[] = INITIAL_STAFF;
   private activeSessions: ActiveGymSession[] = INITIAL_ACTIVE_SESSIONS;
   private arunWorkout: WorkoutAssignment = INITIAL_TODAY_WORKOUT_ARUN;
+  private currentUserWorkout: WorkoutAssignment | null = null;
+  private currentAuthUser: UserProfile | null = null;
   private payments: PaymentRecord[] = INITIAL_PAYMENTS;
   private personalRecords: PersonalRecord[] = INITIAL_PERSONAL_RECORDS;
   private attendanceLogs: AttendanceRecord[] = INITIAL_ATTENDANCE_LOGS;
@@ -98,9 +102,9 @@ class DataService {
         })
       );
 
-      // 4. Trainers Directory (Public)
+      // 4. Floor Coaches Directory (Publicly accessible in Firestore)
       this.unsubs.push(
-        trainerService.subscribeTrainers((trainers) => {
+        staffService.subscribeTrainers((trainers) => {
           this.trainers = trainers;
           this.notify();
         })
@@ -111,7 +115,7 @@ class DataService {
   }
 
   /**
-   * Dynamically attaches or detaches role-scoped listeners (e.g. Audit Logs, Payments, Members)
+   * Dynamically attaches or detaches role-scoped listeners (e.g. Audit Logs, Payments, Members, Full Staff)
    * strictly when an authenticated user with sufficient authorization is active.
    */
   public syncForUser(user: UserProfile | null) {
@@ -121,7 +125,10 @@ class DataService {
     });
     this.roleUnsubs = [];
 
+    this.currentAuthUser = user;
+
     if (!user) {
+      this.currentUserWorkout = null;
       this.auditLogs = [];
       this.notify();
       return;
@@ -131,11 +138,36 @@ class DataService {
     const isAdminOrOwner = user.role === 'admin' || user.role === 'owner';
 
     try {
-      // Staff members get access to Member list
+      // Members get access to their personal daily workout plan
+      if (user.role === 'member') {
+        const today = new Date().toISOString().split('T')[0];
+        // Initialize default personalized workout for this athlete
+        this.currentUserWorkout = this.buildDefaultWorkoutForMember(user, today);
+        this.notify();
+
+        // Subscribe to their Firestore workout record if one exists
+        this.roleUnsubs.push(
+          workoutService.subscribeWorkoutForMember(user.id, today, (assigned) => {
+            if (assigned) {
+              this.currentUserWorkout = assigned;
+              this.notify();
+            }
+          })
+        );
+      }
+      // Staff members get access to Member list and full Staff Directory
       if (isStaff) {
         this.roleUnsubs.push(
           memberService.subscribeMembers((members) => {
             this.members = members;
+            this.notify();
+          })
+        );
+
+        this.roleUnsubs.push(
+          staffService.subscribeStaff((allStaff) => {
+            this.staff = allStaff.filter(s => s.role === 'admin' || s.role === 'owner');
+            this.trainers = allStaff.filter(s => s.role === 'trainer');
             this.notify();
           })
         );
@@ -227,8 +259,68 @@ class DataService {
     this.notify();
   }
 
+  async createStaffMember(
+    data: {
+      fullName: string;
+      email: string;
+      phone?: string;
+      role: 'trainer' | 'admin' | 'owner';
+      fitnessGoal?: string;
+      experience?: string;
+      trainerNotes?: string;
+      avatarUrl?: string;
+    },
+    creatorName: string = 'Club Director'
+  ): Promise<UserProfile> {
+    const newStaff = await staffService.createStaffMember(data, creatorName);
+    if (newStaff.role === 'trainer') {
+      this.trainers = [newStaff, ...this.trainers.filter(t => t.email.toLowerCase() !== newStaff.email.toLowerCase())];
+    } else {
+      this.staff = [newStaff, ...this.staff.filter(s => s.email.toLowerCase() !== newStaff.email.toLowerCase())];
+    }
+    this.notify();
+    return newStaff;
+  }
+
+  async updateStaffStatus(uid: string, isActive: boolean, actorName: string = 'Club Director'): Promise<void> {
+    await staffService.updateStaffStatus(uid, isActive, actorName);
+    this.staff = this.staff.map(s => (s.id === uid || s.uid === uid) ? { ...s, isActive } : s);
+    this.trainers = this.trainers.map(t => (t.id === uid || t.uid === uid) ? { ...t, isActive } : t);
+    this.notify();
+  }
+
+  async updateStaffRole(uid: string, newRole: UserRole, actorName: string = 'Club Director'): Promise<void> {
+    await staffService.updateStaffRole(uid, newRole, actorName);
+    const target = this.getAllProfiles().find(p => p.id === uid || p.uid === uid);
+    if (target) {
+      const updated = { ...target, role: newRole };
+      this.staff = this.staff.filter(s => s.id !== uid && s.uid !== uid);
+      this.trainers = this.trainers.filter(t => t.id !== uid && t.uid !== uid);
+      if (newRole === 'trainer') {
+        this.trainers.push(updated);
+      } else {
+        this.staff.push(updated);
+      }
+      this.notify();
+    }
+  }
+
+  async updateStaffProfile(uid: string, updates: Partial<UserProfile>, actorName: string = 'Club Director'): Promise<void> {
+    await staffService.updateStaffProfile(uid, updates, actorName);
+    this.staff = this.staff.map(s => (s.id === uid || s.uid === uid) ? { ...s, ...updates } : s);
+    this.trainers = this.trainers.map(t => (t.id === uid || t.uid === uid) ? { ...t, ...updates } : t);
+    this.notify();
+  }
+
+  async deleteStaffMember(uid: string, actorName: string = 'Club Director'): Promise<void> {
+    await staffService.deleteStaffMember(uid, actorName);
+    this.staff = this.staff.filter(s => s.id !== uid && s.uid !== uid);
+    this.trainers = this.trainers.filter(t => t.id !== uid && t.uid !== uid);
+    this.notify();
+  }
+
   getActiveSessions(): ActiveGymSession[] { return this.activeSessions; }
-  getWorkoutAssignment(): WorkoutAssignment { return this.arunWorkout; }
+  getWorkoutAssignment(): WorkoutAssignment { return this.currentUserWorkout || this.arunWorkout; }
   getPayments(): PaymentRecord[] { return this.payments; }
   getPersonalRecords(): PersonalRecord[] { return this.personalRecords; }
   getAttendanceLogs(): AttendanceRecord[] { return this.attendanceLogs; }
@@ -510,7 +602,8 @@ class DataService {
   }
 
   toggleExerciseCompleted(exerciseId: string): void {
-    const updatedExercises = this.arunWorkout.exercises.map(ex => {
+    const current = this.currentUserWorkout || this.arunWorkout;
+    const updatedExercises = current.exercises.map(ex => {
       if (ex.id === exerciseId) {
         return { ...ex, completed: !ex.completed };
       }
@@ -522,15 +615,21 @@ class DataService {
     const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
     const isCompleted = completedCount === totalCount && totalCount > 0;
 
-    this.arunWorkout = {
-      ...this.arunWorkout,
+    const updatedWorkout: WorkoutAssignment = {
+      ...current,
       exercises: updatedExercises,
       completionPercentage,
       isCompleted
     };
 
-    // Write to Firestore
-    workoutService.toggleExerciseComplete(this.arunWorkout.id, exerciseId, this.arunWorkout).catch(e => console.warn(e));
+    if (this.currentUserWorkout) {
+      this.currentUserWorkout = updatedWorkout;
+    } else {
+      this.arunWorkout = updatedWorkout;
+    }
+
+    // Write to Firestore under the workout assignment ID
+    workoutService.toggleExerciseComplete(updatedWorkout.id, exerciseId, updatedWorkout).catch(e => console.warn(e));
     this.notify();
   }
 
@@ -548,8 +647,9 @@ class DataService {
     trainerName: string;
   }): void {
     const { newWorkout, reason, trainerName, newZoneId, newZoneName } = params;
-    this.arunWorkout = {
-      ...this.arunWorkout,
+    const current = this.currentUserWorkout || this.arunWorkout;
+    const updatedWorkout: WorkoutAssignment = {
+      ...current,
       title: newWorkout,
       zoneId: newZoneId,
       zoneName: newZoneName,
@@ -557,24 +657,121 @@ class DataService {
       overrideReason: `${newWorkout} - ${reason} (Approved by ${trainerName})`
     };
 
+    if (this.currentUserWorkout) {
+      this.currentUserWorkout = updatedWorkout;
+    } else {
+      this.arunWorkout = updatedWorkout;
+    }
+
     workoutService.recordWorkoutOverride({
-      assignmentId: this.arunWorkout.id,
+      assignmentId: updatedWorkout.id,
       memberId: params.memberId,
-      memberName: this.arunWorkout.memberName,
+      memberName: updatedWorkout.memberName,
       trainerName,
       originalWorkout: params.originalWorkout,
       newWorkout,
       reason
     }).catch(e => console.warn(e));
 
-    this.addAudit(trainerName, 'OVERRIDE_WORKOUT', 'WorkoutAssignment', this.arunWorkout.id, `Overrode workout to "${newWorkout}" in ${newZoneName}. Reason: ${reason}`);
+    this.addAudit(trainerName, 'OVERRIDE_WORKOUT', 'WorkoutAssignment', updatedWorkout.id, `Overrode workout to "${newWorkout}" in ${newZoneName}. Reason: ${reason}`);
     this.notify();
+  }
+
+  private buildDefaultWorkoutForMember(user: UserProfile, today: string): WorkoutAssignment {
+    return {
+      id: `wa_${user.id}_${today}`,
+      memberId: user.id,
+      memberUid: user.uid || user.id,
+      memberName: user.fullName || 'Club Athlete',
+      date: today,
+      title: user.fitnessGoal ? `${user.fitnessGoal} Session` : 'Chest + Triceps Hypertrophy',
+      targetMuscles: ['Pectorals', 'Anterior Delts', 'Triceps Brachii'],
+      zoneId: 'zone-chest',
+      zoneName: 'Chest Zone',
+      trainerId: user.assignedTrainerId || 'trainer-rahul',
+      trainerName: user.assignedTrainerName || 'Rahul Sharma',
+      timeSlot: user.preferredTime ? `${user.preferredTime} – 1 Hour` : '6:00 PM – 7:00 PM',
+      completionPercentage: 0,
+      isCompleted: false,
+      isOverride: false,
+      exercises: [
+        {
+          id: 'ex-1',
+          name: 'Flat Barbell Bench Press',
+          targetMuscles: ['Chest', 'Triceps'],
+          sets: 4,
+          reps: '10, 8, 8, 6',
+          restSeconds: 90,
+          equipment: 'Olympic Barbell & Flat Bench',
+          instructions: 'Retract scapulae, touch lower sternum under control, drive upward explosively.',
+          completed: false,
+          notes: 'Standard working sets'
+        },
+        {
+          id: 'ex-2',
+          name: 'Incline Dumbbell Press',
+          targetMuscles: ['Upper Chest', 'Front Delts'],
+          sets: 3,
+          reps: '10-12',
+          restSeconds: 75,
+          equipment: '30° Incline Bench & Dumbbells',
+          instructions: 'Keep elbows at 45 degree angle to protect right shoulder joint.',
+          completed: false,
+          notes: ''
+        },
+        {
+          id: 'ex-3',
+          name: 'Cable Pec Fly (Mid-Pulley)',
+          targetMuscles: ['Chest'],
+          sets: 3,
+          reps: '12-15',
+          restSeconds: 60,
+          equipment: 'Dual Cable Cross Stack',
+          instructions: 'Squeeze pecs hard at midline for a 1-second peak contraction.',
+          completed: false,
+          notes: ''
+        },
+        {
+          id: 'ex-4',
+          name: 'Dips / Bodyweight Chest Dips',
+          targetMuscles: ['Chest', 'Triceps'],
+          sets: 3,
+          reps: '10-12',
+          restSeconds: 60,
+          equipment: 'Dip Station Bars',
+          instructions: 'Torso angled forward 30 degrees for chest focus.',
+          completed: false,
+          notes: ''
+        },
+        {
+          id: 'ex-5',
+          name: 'Overhead Triceps Rope Extension',
+          targetMuscles: ['Triceps Long Head'],
+          sets: 3,
+          reps: '12-15',
+          restSeconds: 60,
+          equipment: 'High Cable Pulley & Rope',
+          instructions: 'Lock elbows in place and extend through triceps.',
+          completed: false,
+          notes: ''
+        }
+      ]
+    };
   }
 
   updateZone(zoneId: string, updates: Partial<GymZone>, actor: string = 'Director Karan Singhania'): void {
     if (updates.capacity !== undefined) {
       this.updateZoneCapacity(zoneId, updates.capacity, actor);
     }
+  }
+
+  updateWorkoutTimeSlot(newTimeSlot: string): void {
+    this.arunWorkout = {
+      ...this.arunWorkout,
+      timeSlot: newTimeSlot
+    };
+    this.addAudit(this.arunWorkout.memberName, 'UPDATE_TIME_SLOT', 'WorkoutAssignment', this.arunWorkout.id, `Updated scheduled session slot to ${newTimeSlot}`);
+    this.notify();
   }
 
   overrideWorkout(newWorkoutName: string, reason: string, trainerName: string): void {

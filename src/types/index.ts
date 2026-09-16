@@ -12,6 +12,7 @@ export interface UserProfile {
   phone?: string;
   role: UserRole;
   isActive: boolean;
+  gymId?: string;
   avatarUrl?: string;
   memberId?: string; // e.g. IFC-1024
   qrToken?: string;  // Opaque secure token e.g. IFC_SEC_8f93...
@@ -76,6 +77,8 @@ export interface ExerciseItem {
 export interface WorkoutAssignment {
   id: string;
   memberId: string;
+  memberUid?: string;
+  gymId?: string;
   memberName: string;
   date: string;
   title: string;

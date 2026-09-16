@@ -96,6 +96,8 @@ export const workoutService = {
       const ref = doc(db, WORKOUT_COLLECTION, assignmentId);
       await setDoc(ref, {
         ...currentWorkout,
+        id: assignmentId,
+        gymId: DEFAULT_GYM_ID,
         exercises: updatedExercises,
         completionPercentage,
         isCompleted,

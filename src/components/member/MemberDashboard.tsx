@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Dumbbell, 
   QrCode, 
@@ -18,15 +18,25 @@ import {
   Home,
   ShieldAlert,
   ExternalLink,
-  History
+  History,
+  Plus,
+  Sparkles,
+  Bell,
+  Smartphone,
+  Volume2
 } from 'lucide-react';
 import { UserProfile, WorkoutAssignment, GymZone, PersonalRecord, AttendanceRecord } from '../../types';
 import { dataService } from '../../services/dataService';
 import { generateCryptographicQrToken, isValidQrTokenFormat } from '../../services/qrService';
+import { triggerPrConfetti } from '../../utils/confetti';
+import { notificationService, WorkoutReminderAlert } from '../../services/notificationService';
 import { QRCodeModal } from '../common/QRCodeModal';
 import { LiveFloorStatus } from '../common/LiveFloorStatus';
 import { WorkoutHistoryView } from './WorkoutHistoryView';
 import { MonthlyCalendarView } from './MonthlyCalendarView';
+import { LogPRModal } from './LogPRModal';
+import { WorkoutReminderToast } from '../common/WorkoutReminderToast';
+import { WorkoutReminderSettingsModal } from './WorkoutReminderSettingsModal';
 
 interface MemberDashboardProps {
   member: UserProfile;
@@ -48,11 +58,75 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
   onLogout
 }) => {
   const [showQR, setShowQR] = useState(false);
+  const [showLogPRModal, setShowLogPRModal] = useState(false);
+  const [showReminderSettings, setShowReminderSettings] = useState(false);
+  const [activeReminderAlert, setActiveReminderAlert] = useState<WorkoutReminderAlert | null>(null);
+  const [, setClockTick] = useState(Date.now());
+  const [recentPRAlert, setRecentPRAlert] = useState<{ exercise: string; weight: number; improvement?: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'HOME' | 'CALENDAR' | 'WORKOUT' | 'PROGRESS' | 'ATTENDANCE' | 'PROFILE'>('HOME');
   const [workoutSubTab, setWorkoutSubTab] = useState<'CURRENT' | 'PAST'>('PAST');
   const [activeQrToken, setActiveQrToken] = useState<string>(() => {
     return member.qrToken && isValidQrTokenFormat(member.qrToken) ? member.qrToken : '';
   });
+
+  // Listen to incoming notifications and run automatic 1-hour workout reminder checks
+  useEffect(() => {
+    // 1. Subscribe to alerts dispatched through the notification system
+    const unsubscribe = notificationService.subscribe((alert) => {
+      setActiveReminderAlert(alert);
+    });
+
+    // 2. Scheduled session check function
+    const evaluateWorkoutReminder = () => {
+      setClockTick(Date.now());
+      if (!workout) return;
+
+      const evalResult = notificationService.checkShouldTrigger1HourReminder(workout);
+      if (evalResult.shouldTrigger) {
+        notificationService.dispatchReminderAlert({
+          id: `reminder-${workout.id}-${Date.now()}`,
+          workoutId: workout.id,
+          workoutTitle: workout.title || 'Scheduled Session',
+          timeSlot: workout.timeSlot || '6:00 PM – 7:00 PM',
+          startTimeFormatted: evalResult.startTimeFormatted,
+          minutesRemaining: evalResult.minutesRemaining,
+          zoneName: workout.zoneName || 'Main Training Floor',
+          trainerName: workout.trainerName || member.assignedTrainerName || 'Floor Coach',
+          exercisesCount: workout.exercises?.length || 5,
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    // Run immediately on load and periodic poll every 25 seconds
+    evaluateWorkoutReminder();
+    const interval = setInterval(evaluateWorkoutReminder, 25000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
+  }, [workout, member.assignedTrainerName]);
+
+  const minutesUntilSession = notificationService.getMinutesUntilSession(workout.timeSlot, workout.date);
+  const isWithin1HourWindow = minutesUntilSession !== null && minutesUntilSession <= 60 && minutesUntilSession > 0;
+  const sessionStartTimeStr = notificationService.formatStartTime(workout.timeSlot, workout.date);
+  const reminderTimeFormatted = (() => {
+    const startObj = notificationService.parseStartTime(workout.timeSlot, workout.date);
+    if (!startObj) return '1 hr before';
+    return new Date(startObj.getTime() - 60 * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  })();
+
+  const handlePrLogged = (newPr: PersonalRecord) => {
+    setRecentPRAlert({
+      exercise: newPr.exercise,
+      weight: newPr.weightKg,
+      improvement: newPr.improvementPercentage
+    });
+    setTimeout(() => {
+      setRecentPRAlert(null);
+    }, 7000);
+  };
 
   const handleOpenCheckInQR = () => {
     let token = activeQrToken || member.qrToken;
@@ -100,6 +174,22 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                 <strong className="text-white font-mono">{member.attendanceStreak || 0}d</strong>
               </div>
             </div>
+
+            {/* 1-Hour Workout Reminder Alert Bell */}
+            <button
+              id="header-workout-reminder-btn"
+              onClick={() => setShowReminderSettings(true)}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition active:scale-95"
+              title="Workout Reminders & Push Notification Settings"
+            >
+              <Bell className="w-4 h-4 text-emerald-400" />
+              {isWithin1HourWindow && (
+                <span className="w-2 h-2 rounded-full bg-amber-400 absolute top-1.5 right-1.5 animate-ping" />
+              )}
+              <span className="hidden sm:inline text-xs font-bold font-mono">
+                {isWithin1HourWindow ? `${minutesUntilSession}m` : 'Alerts'}
+              </span>
+            </button>
 
             {/* QR Check-In Pass Button */}
             <button
@@ -216,6 +306,62 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                   </div>
                 </div>
 
+                {/* 1-Hour Advance Reminder Status Banner & Controls */}
+                <div className={`my-3 p-3 sm:p-3.5 rounded-xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                  isWithin1HourWindow
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                    : 'bg-zinc-900/50 border-zinc-800 text-zinc-300'
+                }`}>
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                      isWithin1HourWindow
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse'
+                        : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                    }`}>
+                      <Bell className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11px] font-bold uppercase tracking-wider ${
+                          isWithin1HourWindow ? 'text-amber-400' : 'text-emerald-400'
+                        }`}>
+                          {isWithin1HourWindow 
+                            ? `Workout Starting Soon • In ${minutesUntilSession} Mins` 
+                            : 'Scheduled Session Reminder'}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                          1 Hr Before
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {isWithin1HourWindow 
+                          ? `Session starts at ${sessionStartTimeStr} in ${workout.zoneName}. Get ready!`
+                          : `Automatic push & toast alert set for ${reminderTimeFormatted} (1 hr before session)`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <button
+                      id="card-test-reminder-btn"
+                      onClick={() => notificationService.triggerTestReminder(workout)}
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-zinc-700"
+                      title="Trigger sample 1-hour push notification and toast alert right now"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Test Alert</span>
+                    </button>
+
+                    <button
+                      id="card-reminder-settings-btn"
+                      onClick={() => setShowReminderSettings(true)}
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider transition active:scale-95"
+                    >
+                      Alert Settings
+                    </button>
+                  </div>
+                </div>
+
                 {/* Exercises Check-off Preview */}
                 <div className="mt-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
@@ -316,17 +462,37 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                     <Trophy className="w-4 h-4 text-amber-400" />
                     <span className="text-xs font-bold uppercase tracking-wider text-white">Personal Bests</span>
                   </div>
-                  <span className="text-[10px] text-zinc-400">Verified</span>
+                  <button
+                    id="home-log-pr-btn"
+                    onClick={() => setShowLogPRModal(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider transition active:scale-95"
+                    title="Log a new Personal Record and celebrate"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Log PR</span>
+                  </button>
                 </div>
 
                 <div className="mt-3 space-y-2.5">
                   {memberPRs.map((pr) => (
-                    <div key={pr.id} className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800/80">
+                    <div key={pr.id} className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800/80 hover:border-zinc-700 transition">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-zinc-200">{pr.exercise}</span>
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-sm font-extrabold font-mono text-emerald-400">{pr.weightKg} KG</span>
-                          <span className="text-[10px] text-zinc-500 font-mono">× {pr.reps}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-sm font-extrabold font-mono text-emerald-400">{pr.weightKg} KG</span>
+                            <span className="text-[10px] text-zinc-500 font-mono">× {pr.reps}</span>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              triggerPrConfetti();
+                            }}
+                            title="Celebrate this PR!"
+                            className="p-1 rounded-lg hover:bg-amber-500/20 text-zinc-500 hover:text-amber-400 transition active:scale-90"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                       {pr.improvementPercentage && (
@@ -411,23 +577,61 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         {/* TAB 3: PROGRESS & PRS */}
         {activeTab === 'PROGRESS' && (
           <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl space-y-6">
-            <div className="border-b border-zinc-800 pb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Strength Analytics</span>
-              <h2 className="text-2xl font-black text-white uppercase mt-1">Personal Best Records</h2>
-              <p className="text-xs text-zinc-400 mt-1">Official floor-verified weight and rep milestones.</p>
+            <div className="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Strength Analytics</span>
+                <h2 className="text-2xl font-black text-white uppercase mt-1">Personal Best Records</h2>
+                <p className="text-xs text-zinc-400 mt-1">Official floor-verified weight and rep milestones.</p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  id="progress-celebrate-btn"
+                  onClick={() => triggerPrConfetti()}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-amber-400 hover:text-amber-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95"
+                  title="Trigger celebration confetti effect"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Celebrate</span>
+                </button>
+
+                <button
+                  id="progress-log-pr-btn"
+                  onClick={() => setShowLogPRModal(true)}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-black font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Log PR</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {memberPRs.map((pr) => (
-                <div key={pr.id} className="p-4 rounded-xl bg-zinc-900 border border-zinc-800">
+                <div key={pr.id} className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 relative group transition">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-zinc-300">{pr.exercise}</span>
-                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        triggerPrConfetti();
+                      }}
+                      title="Celebrate this PR achievement!"
+                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 transition active:scale-90"
+                    >
+                      <Trophy className="w-4 h-4" />
+                    </button>
                   </div>
                   <div className="text-2xl font-black font-mono text-emerald-400">
                     {pr.weightKg} KG
                   </div>
                   <div className="text-xs text-zinc-400 mt-1 font-mono">Repetition Count: {pr.reps} Reps</div>
+                  {pr.improvementPercentage ? (
+                    <div className="mt-2 text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span>+{pr.improvementPercentage}% improvement</span>
+                    </div>
+                  ) : null}
                   <div className="mt-3 pt-3 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500">
                     <span>Verified: {pr.verifiedBy}</span>
                     <span>{pr.date}</span>
@@ -631,6 +835,65 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         isOpen={showQR}
         onClose={() => setShowQR(false)}
         onRegenerateToken={(newToken) => setActiveQrToken(newToken)}
+      />
+
+      {/* Log PR Modal with Confetti Celebration */}
+      <LogPRModal
+        member={member}
+        existingPRs={prs}
+        isOpen={showLogPRModal}
+        onClose={() => setShowLogPRModal(false)}
+        onPrLogged={handlePrLogged}
+      />
+
+      {/* Subtle Milestone Celebration Toast Notification */}
+      {recentPRAlert && (
+        <div 
+          id="pr-celebration-toast"
+          className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md p-4 rounded-2xl bg-[#121214]/95 border border-emerald-500/50 text-white shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3 animate-in slide-in-from-bottom-5 duration-300"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 animate-bounce">
+              <Trophy className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>New Personal Record Logged!</span>
+              </div>
+              <div className="text-sm font-black text-white uppercase">
+                {recentPRAlert.exercise} — <span className="font-mono text-emerald-400">{recentPRAlert.weight} KG</span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => triggerPrConfetti()}
+            className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-wider shadow-md transition active:scale-95 shrink-0 flex items-center gap-1"
+            title="Replay celebration confetti"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Confetti</span>
+          </button>
+        </div>
+      )}
+
+      {/* In-App Workout Reminder Toast Alert (1 hour advance reminder) */}
+      <WorkoutReminderToast
+        alert={activeReminderAlert}
+        onClose={() => setActiveReminderAlert(null)}
+        onViewRoutine={() => {
+          setWorkoutSubTab('CURRENT');
+          setActiveTab('WORKOUT');
+        }}
+        onOpenCheckInQR={handleOpenCheckInQR}
+      />
+
+      {/* Workout Reminder & Push Notification Settings Modal */}
+      <WorkoutReminderSettingsModal
+        workout={workout}
+        isOpen={showReminderSettings}
+        onClose={() => setShowReminderSettings(false)}
+        onTriggerTestReminder={() => notificationService.triggerTestReminder(workout)}
       />
 
       {/* Mobile App Bottom Navigation (Fixed, reachable, min 44px touch targets) */}
