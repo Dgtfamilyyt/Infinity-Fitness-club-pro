@@ -59,17 +59,12 @@ export const workoutService = {
         if (!snap.empty) {
           callback({ ...snap.docs[0].data(), id: snap.docs[0].id } as WorkoutAssignment);
         } else {
-          // Arun demo fallback if unseeded
-          if (memberId.includes('arun')) {
-            callback(INITIAL_TODAY_WORKOUT_ARUN);
-          } else {
-            callback(null);
-          }
+          callback(null);
         }
       },
       (error) => {
         console.warn('Workout assignment snapshot listener error:', error);
-        callback(memberId.includes('arun') ? INITIAL_TODAY_WORKOUT_ARUN : null);
+        callback(null);
       }
     );
   },

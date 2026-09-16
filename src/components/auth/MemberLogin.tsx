@@ -18,9 +18,8 @@ import {
 import { 
   signInWithEmail, 
   signInWithGoogle, 
-  signInWithGoogleRedirect,
+  signInWithGoogleRedirect, 
   sendResetPassword, 
-  signUpWithEmail,
   parseAuthError
 } from '../../lib/firebase';
 import { GymSettings } from '../../types';
@@ -38,11 +37,9 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
   onNavigateHome,
   onNavigateStaffLogin
 }) => {
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [fullName, setFullName] = useState('');
   const emailInputRef = useRef<HTMLInputElement>(null);
   
   // Loading & Error States
@@ -62,7 +59,7 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) {
-      setErrorMessage('Please provide both email address and password.');
+      setErrorMessage('Please provide both registered email address and password.');
       return;
     }
 
@@ -72,13 +69,8 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
     setShowProviderNotice(false);
 
     try {
-      if (isSignUp) {
-        const user = await signUpWithEmail(email, password);
-        onSuccess(user.email || email);
-      } else {
-        const user = await signInWithEmail(email, password);
-        onSuccess(user.email || email);
-      }
+      const user = await signInWithEmail(email, password);
+      onSuccess(user.email || email);
     } catch (err: any) {
       console.error('Auth error:', err);
       const parsed = parseAuthError(err);
@@ -256,19 +248,12 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                   <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono uppercase tracking-wider">
                     ATHLETE ENTRANCE
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSignUp(!isSignUp);
-                      setErrorMessage(null);
-                    }}
-                    className="text-xs text-emerald-400 hover:underline font-semibold"
-                  >
-                    {isSignUp ? 'Already enrolled? Sign In' : 'New athlete? Join Now'}
-                  </button>
+                  <span className="text-xs text-zinc-500 font-medium">
+                    Infinity Member Club
+                  </span>
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-black text-white uppercase mt-2 tracking-tight">
-                  {isSignUp ? 'Create Athlete Account' : 'Sign In To Member Club'}
+                  Sign In To Member Club
                 </h2>
                 <p className="text-xs text-zinc-400 mt-1">
                   Access your workout splits, contactless QR pass, and training records
@@ -397,22 +382,6 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
 
               {/* Form */}
               <form onSubmit={handleEmailSubmit} className="space-y-4">
-                {isSignUp && (
-                  <div>
-                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1">
-                      Full Athlete Name
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Arun Patel"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-xs placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
-                )}
-
                 <div>
                   <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1">
                     Registered Email Address
@@ -436,18 +405,16 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                     <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block">
                       Password
                     </label>
-                    {!isSignUp && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResetEmail(email);
-                          setShowForgotModal(true);
-                        }}
-                        className="text-[11px] text-zinc-400 hover:text-emerald-400 transition"
-                      >
-                        Forgot Password?
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(email);
+                        setShowForgotModal(true);
+                      }}
+                      className="text-[11px] text-zinc-400 hover:text-emerald-400 transition"
+                    >
+                      Forgot Password?
+                    </button>
                   </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
@@ -481,12 +448,19 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                     </>
                   ) : (
                     <>
-                      <span>{isSignUp ? 'Create & Access Club' : 'Sign In To Dashboard'}</span>
+                      <span>Sign In To Dashboard</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
                 </button>
               </form>
+
+              {/* Reception notice for new athletes */}
+              <div className="mt-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center">
+                <p className="text-[11px] text-zinc-400">
+                  New to Infinity Fitness Club? Memberships and athlete profiles are issued by club reception.
+                </p>
+              </div>
 
               {/* Mobile Staff Link */}
               <div className="mt-6 pt-4 border-t border-zinc-800/80 text-center lg:hidden">

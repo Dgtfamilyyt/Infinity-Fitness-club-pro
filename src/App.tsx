@@ -5,6 +5,7 @@ import { dataService } from './services/dataService';
 import { attendanceService } from './services/attendanceService';
 import { generateCryptographicQrToken } from './services/qrService';
 import { 
+  getUserProfile,
   fetchUserProfile, 
   fetchUserProfileByEmail,
   saveUserProfile, 
@@ -127,92 +128,38 @@ export default function App() {
         return;
       }
 
-      // User is authenticated: resolve profile strictly from Firestore
+      // User is authenticated: resolve profile strictly from Firestore profiles/{uid}
       const userEmail = (authUser.email || '').toLowerCase().trim();
 
       try {
-        // 1. Check Firestore by UID
-        let profile = await fetchUserProfile(authUser.uid);
+        // 1. Check Firestore by UID: profiles/{uid}
+        let profile = await getUserProfile(authUser.uid);
 
-        // 2. If not found by UID, check Firestore by email (handles pre-enrolled members & staff)
+        // 2. If not found by UID yet, check if reception pre-registered this email
         if (!profile && userEmail) {
-          profile = await fetchUserProfileByEmail(userEmail);
-          if (profile) {
-            profile = { ...profile, uid: authUser.uid, id: authUser.uid };
+          const preRegistered = await fetchUserProfileByEmail(userEmail) || dataService.findProfileByEmail(userEmail);
+          if (preRegistered) {
+            // Bind the verified Firebase Auth UID to the pre-registered profile
+            profile = {
+              ...preRegistered,
+              uid: authUser.uid,
+              id: authUser.uid
+            };
             dataService.upsertProfile(profile);
-            await saveUserProfile(profile).catch(() => {});
-          } else {
-            // Check cache / seed data by email
-            const matched = dataService.findProfileByEmail(userEmail);
-            if (matched) {
-              profile = { ...matched, uid: authUser.uid, id: authUser.uid };
-              dataService.upsertProfile(profile);
-              await saveUserProfile(profile).catch(() => {});
-            }
+            await saveUserProfile(profile).catch((e) => console.warn('Profile sync notice:', e));
           }
         }
 
-        // 3. Trusted Bootstrap Provisioning for Club Owner
-        const isBootstrapOwner = (
-          userEmail === 'dgtfamilyyt8@gmail.com' ||
-          userEmail === 'owner@infinityfitnessclub.in'
-        );
-
-        if (!profile && isBootstrapOwner) {
-          profile = {
-            id: authUser.uid,
-            uid: authUser.uid,
-            email: userEmail,
-            fullName: userEmail.includes('dgtfamily') ? 'Karan Singhania (Club Owner)' : 'Club Owner',
-            role: 'owner',
-            isActive: true,
-            gymId: 'infinity-neelambur',
-            fitnessGoal: 'Club Founder & Managing Director',
-            phone: '+91 81898 51615',
-            avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-            createdAt: new Date().toISOString()
-          };
-          dataService.upsertProfile(profile);
-          await saveUserProfile(profile).catch(() => {});
-        }
-
-        // 4. If user was attempting staff login and has no staff profile, forbid creation
+        // 3. If profile does not exist, user is unconfigured (Google login does NOT auto-create membership or staff roles)
         if (!profile) {
-          if (route === 'STAFF_LOGIN' || route === 'STAFF_PORTAL') {
-            dataService.syncForUser(null);
-            setCurrentUser(null);
-            setAccountStatus('DENIED');
-            setDenialMessage('Access Denied: This account is not registered as an authorized Infinity staff member or coach. Please contact the Club Owner.');
-            setAuthLoading(false);
-            return;
-          }
-
-          // New self-registered athlete on the Member Portal:
-          // Provision standard MEMBER account only (strictly role: 'member')
-          profile = {
-            id: authUser.uid,
-            uid: authUser.uid,
-            email: userEmail,
-            fullName: authUser.displayName || userEmail.split('@')[0] || 'Club Athlete',
-            role: 'member',
-            isActive: true,
-            status: 'ACTIVE',
-            gymId: 'infinity-neelambur',
-            memberId: `IFC-${Math.floor(1000 + Math.random() * 9000)}`,
-            membershipPlanId: 'plan-quarterly',
-            planName: 'Quarterly Transformation',
-            membershipStart: new Date().toISOString().split('T')[0],
-            membershipExpiry: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
-            fitnessGoal: 'Hypertrophy & Strength',
-            attendanceStreak: 0,
-            workoutStreak: 0,
-            qrToken: `IFC1.${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`,
-            createdAt: new Date().toISOString()
-          };
-          dataService.upsertProfile(profile);
-          await saveUserProfile(profile).catch(() => {});
+          dataService.syncForUser(null);
+          setCurrentUser(null);
+          setAccountStatus('UNCONFIGURED');
+          setAuthLoading(false);
+          return;
         }
 
+        // 4. Check if profile is inactive or suspended
         if (profile.isActive === false) {
           dataService.syncForUser(null);
           setCurrentUser(profile);
@@ -221,35 +168,30 @@ export default function App() {
           return;
         }
 
-        // Valid active profile - dynamically bind role-scoped Firestore subscriptions
+        // 5. Valid active profile: sync role-scoped records and establish authorized session
         dataService.syncForUser(profile);
         setCurrentUser(profile);
         setAccountStatus('OK');
 
-        // Route resolution based on role clearance
+        // 6. Authoritative role-based routing (Role determines the view, never the client)
         if (profile.role === 'member') {
-          // Member trying to access staff portal
           setRoute(prev => {
             if (prev === 'STAFF_PORTAL' || prev === 'STAFF_LOGIN') {
               setAccountStatus('DENIED');
-              setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance. Please use the Athlete Member portal.');
+              setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance.');
               return 'STAFF_LOGIN';
             }
             return prev === 'HOME' ? 'HOME' : 'MEMBER_DASHBOARD';
           });
-        } else {
-          // Staff roles: trainer, admin, owner
-          if (profile.role === 'trainer') setStaffSubView('TRAINER');
-          else if (profile.role === 'admin') setStaffSubView('RECEPTION');
-          else if (profile.role === 'owner') setStaffSubView('ADMIN');
-
-          setRoute(prev => {
-            if (prev === 'MEMBER_DASHBOARD' || prev === 'MEMBER_LOGIN') {
-              return 'STAFF_PORTAL';
-            }
-            if (prev === 'STAFF_LOGIN') return 'STAFF_PORTAL';
-            return prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL';
-          });
+        } else if (profile.role === 'trainer') {
+          setStaffSubView('TRAINER');
+          setRoute(prev => (prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL'));
+        } else if (profile.role === 'admin') {
+          setStaffSubView('RECEPTION');
+          setRoute(prev => (prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL'));
+        } else if (profile.role === 'owner') {
+          setStaffSubView('ADMIN');
+          setRoute(prev => (prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL'));
         }
       } catch (err) {
         console.error('Error resolving user profile:', err);
@@ -295,14 +237,14 @@ export default function App() {
           <div className="absolute -inset-2 rounded-3xl bg-emerald-500/5 blur-xl -z-10" />
         </div>
         <h1 className="mt-6 text-xl font-black uppercase tracking-wider text-white">
-          {settings.name}
+          AUTHENTICATING
         </h1>
         <p className="mt-1 text-xs font-mono text-emerald-400 tracking-widest uppercase">
-          Initializing Secure Session...
+          Verifying authentication & security permissions...
         </p>
         <div className="mt-6 flex items-center gap-2 text-zinc-500 text-xs">
           <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
-          <span>Verifying authentication & security permissions</span>
+          <span>Connecting to Firebase Auth & Cloud Firestore</span>
         </div>
         <Analytics />
       </div>
@@ -321,10 +263,10 @@ export default function App() {
             ACCOUNT NOT CONFIGURED
           </h2>
           <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-            Your authenticated Google account does not have an active athlete or staff profile registered in the Infinity Fitness Club database.
+            Please contact Infinity Fitness Club reception.
           </p>
-          <p className="mt-3 text-xs text-zinc-500">
-            Please contact the gym reception or front desk staff to link your membership ID.
+          <p className="mt-2 text-[11px] text-zinc-500">
+            Your account does not have a linked membership or staff profile registered in the club database.
           </p>
           <div className="mt-6 pt-6 border-t border-zinc-800 flex gap-3">
             <button
@@ -356,10 +298,10 @@ export default function App() {
             <Lock className="w-6 h-6" />
           </div>
           <h2 className="mt-5 text-xl font-black uppercase text-white tracking-tight">
-            ACCOUNT SUSPENDED OR INACTIVE
+            ACCOUNT INACTIVE
           </h2>
           <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-            Your membership or staff profile has been deactivated by administration.
+            Your account is inactive or suspended. Please contact Infinity Fitness Club administration.
           </p>
           <div className="mt-6 pt-6 border-t border-zinc-800 flex justify-center">
             <button

@@ -94,23 +94,20 @@ export const WorkoutHistoryView: React.FC<WorkoutHistoryViewProps> = ({
   const [selectedZoneFilter, setSelectedZoneFilter] = useState<string>('ALL');
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
-  // Filter logs for this member (with fallback to existing sample logs if none found)
+  // Filter logs for this member
   const memberAttendance = useMemo(() => {
-    const directMatches = attendanceLogs.filter(
+    return attendanceLogs.filter(
       a => a.memberId === member.id || 
            (member.memberId && a.memberId === member.memberId) ||
            (a.memberName && member.fullName && a.memberName.toLowerCase() === member.fullName.toLowerCase())
     );
-    // If user has direct records, return them. Otherwise return all seeded logs for demonstration
-    return directMatches.length > 0 ? directMatches : attendanceLogs;
   }, [attendanceLogs, member]);
 
-  // Filter personal records for this member (with fallback)
+  // Filter personal records for this member
   const memberPRs = useMemo(() => {
-    const directMatches = personalRecords.filter(
+    return personalRecords.filter(
       p => p.memberId === member.id || (member.memberId && p.memberId === member.memberId)
     );
-    return directMatches.length > 0 ? directMatches : personalRecords;
   }, [personalRecords, member]);
 
   // Extract unique zones from past logs

@@ -26,24 +26,25 @@ import {
   getDocs,
   serverTimestamp
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import appletConfig from '../../firebase-applet-config.json';
 import { UserProfile, UserRole } from '../types';
 
-// Detect whether running on Vercel production domain to enable same-origin proxy auth handler
-const getAuthDomain = (): string => {
-  if (typeof window !== 'undefined' && window.location.hostname === 'infinity-fitness-club-pro.vercel.app') {
-    return 'infinity-fitness-club-pro.vercel.app';
-  }
-  return firebaseConfig.authDomain || 'swift-fx-h1ttq.firebaseapp.com';
+// Configuration for Firebase Modular Web SDK
+export const firebaseConfig = {
+  apiKey: "AIzaSyDknL2K2XWB65uh01Ko_RUIue5AMVpImG8",
+  authDomain: "swift-fx-h1ttq.firebaseapp.com",
+  projectId: "swift-fx-h1ttq",
+  storageBucket: "swift-fx-h1ttq.firebasestorage.app",
+  messagingSenderId: "18005381258",
+  appId: "1:18005381258:web:fb1c44daa496409249dd73"
 };
 
-// Initialize Firebase App
+// Initialize safely so Firebase is not initialized twice during development/HMR
 const app = getApps().length === 0 
-  ? initializeApp({
-      ...firebaseConfig,
-      authDomain: getAuthDomain()
-    }) 
+  ? initializeApp(firebaseConfig) 
   : getApp();
+
+const firestoreDatabaseId = (appletConfig as any)?.firestoreDatabaseId;
 
 // Initialize Firestore with robust long-polling to prevent 10s backend connection timeouts in proxied / iframe environments
 export const db = (() => {
@@ -53,11 +54,11 @@ export const db = (() => {
       {
         experimentalForceLongPolling: true,
       },
-      firebaseConfig.firestoreDatabaseId || undefined
+      firestoreDatabaseId || undefined
     );
   } catch {
-    return firebaseConfig.firestoreDatabaseId
-      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    return firestoreDatabaseId
+      ? getFirestore(app, firestoreDatabaseId)
       : getFirestore(app);
   }
 })();
@@ -279,20 +280,34 @@ export const logoutUser = async (): Promise<void> => {
   await fbSignOut(auth);
 };
 
-// Firestore Profile management
-export const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
+// Authoritative Profile Lookup from Firestore: profiles/{uid}
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  if (!uid) return null;
   try {
     const ref = doc(db, 'profiles', uid);
     const snap = await getDoc(ref);
     if (snap.exists()) {
-      return snap.data() as UserProfile;
+      const data = snap.data();
+      return {
+        id: snap.id,
+        uid: snap.id,
+        fullName: data.fullName || '',
+        email: data.email || '',
+        role: (data.role as UserRole) || 'member',
+        gymId: data.gymId || 'infinity-neelambur',
+        isActive: data.isActive !== false,
+        ...data
+      } as UserProfile;
     }
     return null;
   } catch (err) {
-    console.warn('Profile fetch notice (falling back to cache):', err);
+    console.warn('Profile fetch notice for UID:', uid, err);
     return null;
   }
 };
+
+// Backward-compatible alias
+export const fetchUserProfile = getUserProfile;
 
 export const fetchUserProfileByEmail = async (email: string): Promise<UserProfile | null> => {
   if (!email) return null;
