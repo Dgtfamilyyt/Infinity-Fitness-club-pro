@@ -87,18 +87,16 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
 
     try {
       await signInWithGoogle();
-      // Browser navigates away to Google Redirect auth directly from user click
+      // Successful popup authentication triggers onAuthStateChanged in App.tsx,
+      // which verifies profiles/{uid}, gymId, isActive, and performs role-based routing.
     } catch (err: any) {
-      const parsed = parseAuthError(err);
-      if (parsed.isCancelled) {
-        setGoogleLoading(false);
-        return;
-      }
       console.error('Google sign-in error:', err);
+      const parsed = parseAuthError(err);
       setErrorMessage(parsed.message);
       if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);
       }
+    } finally {
       setGoogleLoading(false);
     }
   };
@@ -228,7 +226,7 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                 </div>
               )}
 
-              {/* Single Google Redirect Auth Button */}
+              {/* Google Popup Auth Button */}
               <button
                 type="button"
                 onClick={handleGoogleSignIn}

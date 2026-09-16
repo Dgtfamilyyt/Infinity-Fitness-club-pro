@@ -85,18 +85,16 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
 
     try {
       await signInWithGoogle();
-      // Redirect initiated directly from user click
+      // Successful popup authentication triggers onAuthStateChanged in App.tsx,
+      // which verifies profiles/{uid}, gymId, isActive, and performs role-based routing.
     } catch (err: any) {
-      const parsed = parseAuthError(err);
-      if (parsed.isCancelled) {
-        setGoogleLoading(false);
-        return;
-      }
       console.error('Google sign in error:', err);
+      const parsed = parseAuthError(err);
       setErrorMessage(parsed.message);
       if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);
       }
+    } finally {
       setGoogleLoading(false);
     }
   };
@@ -202,7 +200,7 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
             </div>
           )}
 
-          {/* Quick Google Sign In (Redirect Auth) */}
+          {/* Quick Google Sign In (Popup Auth) */}
           <div className="mt-6">
             <button
               type="button"

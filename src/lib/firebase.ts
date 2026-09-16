@@ -2,8 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
   GoogleAuthProvider, 
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut as fbSignOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -106,6 +105,7 @@ export interface AuthErrorInfo {
   code: string;
   message: string;
   isCancelled?: boolean;
+  isPopupBlocked?: boolean;
   isUnauthorizedDomain?: boolean;
   isOperationNotAllowed?: boolean;
   isNetworkError?: boolean;
@@ -116,26 +116,33 @@ export const parseAuthError = (err: any): AuthErrorInfo => {
   const code = err?.code || '';
   const rawMessage = err?.message || 'Authentication failed.';
 
-  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+  if (code === 'auth/popup-blocked') {
     return {
       code,
-      message: 'Google sign-in was cancelled.',
+      message: 'Google sign-in was blocked by your browser. Please allow popups for this site or use email/password.',
+      isPopupBlocked: true
+    };
+  }
+  if (code === 'auth/popup-closed-by-user') {
+    return {
+      code,
+      message: 'Google sign-in window was closed before completing.',
+      isCancelled: true
+    };
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return {
+      code,
+      message: 'Google sign-in request was cancelled.',
       isCancelled: true
     };
   }
   if (code === 'auth/unauthorized-domain') {
-    console.error('Firebase Auth technical error: unauthorized domain. Ensure "infinity-fitness-club-pro.vercel.app" is added in Firebase Console -> Authentication -> Settings -> Authorized domains.', err);
+    console.error('Firebase Auth technical error: unauthorized domain. Ensure your domain is added in Firebase Console -> Authentication -> Settings -> Authorized domains.', err);
     return {
       code,
-      message: 'This domain is not authorized for Firebase Authentication. Please ensure "infinity-fitness-club-pro.vercel.app" is added in Firebase Console → Authentication → Settings → Authorized domains.',
+      message: 'This domain is not authorized for Firebase Authentication. Please ensure this domain is added in Firebase Console → Authentication → Settings → Authorized domains.',
       isUnauthorizedDomain: true
-    };
-  }
-  if (code === 'auth/operation-not-allowed') {
-    return {
-      code,
-      message: 'Google Sign-In is not enabled yet in your Firebase Project Console. Please enable it in Firebase Console → Authentication → Sign-in method.',
-      isOperationNotAllowed: true
     };
   }
   if (code === 'auth/network-request-failed') {
@@ -143,6 +150,13 @@ export const parseAuthError = (err: any): AuthErrorInfo => {
       code,
       message: 'Network connection error. Please check your internet connection.',
       isNetworkError: true
+    };
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return {
+      code,
+      message: 'Google Sign-In is not enabled yet in your Firebase Project Console. Please enable it in Firebase Console → Authentication → Sign-in method.',
+      isOperationNotAllowed: true
     };
   }
   if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
@@ -186,35 +200,15 @@ export const subscribeToAuth = (callback: (user: AppAuthUser | null) => void): (
   });
 };
 
-// Standard Google Authentication: uses signInWithRedirect exclusively
-export const signInWithGoogle = async (): Promise<void> => {
-  await signInWithRedirect(auth, googleProvider);
-};
-
-// Backward-compatible alias
-export const signInWithGoogleRedirect = signInWithGoogle;
-
-// Process redirect result after return (called on app mount)
-export const initAuthRedirect = async (): Promise<AppAuthUser | null> => {
-  try {
-    const result = await getRedirectResult(auth);
-    if (result && result.user) {
-      return {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        emailVerified: result.user.emailVerified
-      };
-    }
-    return null;
-  } catch (err: any) {
-    const parsed = parseAuthError(err);
-    if (!parsed.isCancelled) {
-      console.warn('[AUTH REDIRECT NOTICE]', parsed.code, parsed.message);
-      throw err;
-    }
-    return null;
-  }
+// Standard Google Authentication: uses signInWithPopup directly from user click
+export const signInWithGoogle = async (): Promise<AppAuthUser> => {
+  const result = await signInWithPopup(auth, googleProvider);
+  return {
+    uid: result.user.uid,
+    email: result.user.email,
+    displayName: result.user.displayName,
+    emailVerified: result.user.emailVerified
+  };
 };
 
 // Real Firebase Email/Password Sign-In

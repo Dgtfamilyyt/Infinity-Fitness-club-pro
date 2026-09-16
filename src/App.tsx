@@ -11,7 +11,6 @@ import {
   saveUserProfile, 
   logoutUser,
   subscribeToAuth,
-  initAuthRedirect,
   AppAuthUser
 } from './lib/firebase';
 import { Navbar } from './components/layout/Navbar';
@@ -106,9 +105,6 @@ export default function App() {
 
   // Listen to Auth state (Firebase Auth)
   useEffect(() => {
-    // Process redirect result if arriving from a mobile/browser redirect auth flow
-    initAuthRedirect().catch(() => {});
-
     const unsubscribe = subscribeToAuth(async (authUser: AppAuthUser | null) => {
       setAuthLoading(true);
 
