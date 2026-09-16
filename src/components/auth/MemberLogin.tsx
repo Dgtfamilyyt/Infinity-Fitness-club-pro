@@ -18,7 +18,6 @@ import {
 import { 
   signInWithEmail, 
   signInWithGoogle, 
-  signInWithGoogleRedirect, 
   sendResetPassword, 
   parseAuthError
 } from '../../lib/firebase';
@@ -46,7 +45,6 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [popupBlocked, setPopupBlocked] = useState(false);
   const [showProviderNotice, setShowProviderNotice] = useState(false);
 
   // Forgot Password State
@@ -65,7 +63,6 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
 
     setLoading(true);
     setErrorMessage(null);
-    setPopupBlocked(false);
     setShowProviderNotice(false);
 
     try {
@@ -83,65 +80,26 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
     }
   };
 
-  const handleGoogleSignIn = async (forceRedirect: boolean = false) => {
+  const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     setErrorMessage(null);
-    setPopupBlocked(false);
     setShowProviderNotice(false);
 
     try {
-      const user = await signInWithGoogle(forceRedirect);
-      if (user) {
-        onSuccess(user.email || '');
-      }
-    } catch (err: any) {
-      const parsed = parseAuthError(err);
-      if (parsed.isCancelled) {
-        // User closed or dismissed the popup window - normal user action, reset quietly
-        return;
-      }
-      console.error('Google sign-in error:', err);
-      setErrorMessage(parsed.message);
-      if (parsed.isPopupBlocked) {
-        setPopupBlocked(true);
-      }
-      if (parsed.isOperationNotAllowed) {
-        setShowProviderNotice(true);
-      }
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
-  const handleGoogleRedirect = async () => {
-    setGoogleLoading(true);
-    setErrorMessage(null);
-    setPopupBlocked(false);
-    setShowProviderNotice(false);
-
-    try {
-      await signInWithGoogleRedirect();
+      await signInWithGoogle();
+      // Browser navigates away to Google Redirect auth directly from user click
     } catch (err: any) {
       const parsed = parseAuthError(err);
       if (parsed.isCancelled) {
         setGoogleLoading(false);
         return;
       }
-      console.error('Google redirect error:', err);
+      console.error('Google sign-in error:', err);
       setErrorMessage(parsed.message);
       if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);
       }
       setGoogleLoading(false);
-    }
-  };
-
-  const handleUseEmailLogin = () => {
-    setPopupBlocked(false);
-    setErrorMessage(null);
-    if (emailInputRef.current) {
-      emailInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      emailInputRef.current.focus();
     }
   };
 
@@ -261,7 +219,7 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
               </div>
 
               {/* Error Notice & Firebase Provider Guide */}
-              {errorMessage && !popupBlocked && (
+              {errorMessage && (
                 <div className="mb-5 p-3.5 rounded-xl bg-red-950/30 border border-red-500/30 text-red-300 text-xs space-y-2 animate-in fade-in">
                   <div className="flex items-start gap-2.5">
                     <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
@@ -294,60 +252,17 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                 </div>
               )}
 
-              {/* Friendly Inline Panel: When Popup Is Blocked by Browser */}
-              {popupBlocked && (
-                <div className="mb-5 p-4 rounded-2xl bg-amber-950/30 border border-amber-500/40 text-amber-200 text-xs space-y-3 animate-in fade-in">
-                  <div className="flex items-start gap-2.5">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                    <div>
-                      <h4 className="font-bold text-amber-300 text-xs uppercase tracking-wide">
-                        Google sign-in was blocked by your browser.
-                      </h4>
-                      <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed">
-                        Your browser blocked the Google sign-in window. You can retry opening the popup, continue using full-page redirect, or authenticate with your email credentials.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleGoogleSignIn(false)}
-                      disabled={googleLoading}
-                      className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-[11px] uppercase tracking-wider transition text-center shadow-sm"
-                    >
-                      Try Google Again
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleGoogleRedirect}
-                      disabled={googleLoading}
-                      className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-amber-500/40 text-amber-300 font-bold text-[11px] uppercase tracking-wider transition text-center"
-                    >
-                      Continue Using Redirect
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleUseEmailLogin}
-                      className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 font-bold text-[11px] uppercase tracking-wider transition text-center"
-                    >
-                      Use Email & Password
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Google Sign In Button */}
+              {/* Single Google Redirect Auth Button */}
               <button
                 type="button"
-                onClick={() => handleGoogleSignIn(false)}
+                onClick={handleGoogleSignIn}
                 disabled={googleLoading || loading}
-                className="w-full min-h-[44px] py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white font-semibold text-xs transition flex items-center justify-center gap-3 disabled:opacity-50 shadow-sm"
+                className="w-full min-h-[46px] py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-3 disabled:opacity-50 shadow-sm"
               >
                 {googleLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                 ) : (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                     <path
                       fill="#4285F4"
                       d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -366,7 +281,7 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                     />
                   </svg>
                 )}
-                <span>Continue with Google</span>
+                <span>CONTINUE WITH GOOGLE</span>
               </button>
 
               <div className="relative my-5">
@@ -375,7 +290,7 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase">
                   <span className="bg-[#121214] px-3 text-zinc-500 font-mono font-bold tracking-wider">
-                    Or with email credentials
+                    USE EMAIL & PASSWORD
                   </span>
                 </div>
               </div>
