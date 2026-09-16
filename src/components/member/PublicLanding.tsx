@@ -294,9 +294,10 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
           {trainers.map((trainer) => (
             <div key={trainer.id} className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-6 flex flex-col items-center text-center">
               <img
-                src={trainer.avatarUrl}
+                src={trainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
                 alt={trainer.fullName}
-                className="w-24 h-24 rounded-full object-cover border-2 border-emerald-500/40 p-1 mb-4"
+                referrerPolicy="no-referrer"
+                className="w-24 h-24 rounded-full object-cover border-2 border-emerald-500/40 p-1 mb-4 shadow-lg"
               />
               <h3 className="text-lg font-bold text-white">{trainer.fullName}</h3>
               <div className="text-xs text-emerald-400 font-semibold mt-1">{trainer.fitnessGoal}</div>

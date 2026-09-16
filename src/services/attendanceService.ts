@@ -183,6 +183,29 @@ class AttendanceService {
   }
 
   /**
+   * Registers a newly generated cryptographic QR token in Firestore
+   */
+  async registerMemberQrToken(memberUid: string, token: string): Promise<void> {
+    try {
+      const tokenHash = await hashQrToken(token);
+      if (!tokenHash) return;
+      const tokenRef = doc(db, 'qr_tokens', tokenHash);
+      const record: QrTokenRecord = {
+        memberUid,
+        memberId: memberUid,
+        gymId: 'infinity-neelambur',
+        active: true,
+        createdAt: new Date().toISOString(),
+        revokedAt: null,
+        version: 'IFC1'
+      };
+      await setDoc(tokenRef, record, { merge: true });
+    } catch (err) {
+      console.warn('QR token registration notice:', err);
+    }
+  }
+
+  /**
    * Core Production Check-In Processor:
    * Handles Camera QR scan or Manual Member ID entry through the EXACT same transactional pipeline.
    */

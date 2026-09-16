@@ -29,6 +29,7 @@ import {
   AuditLog 
 } from '../../types';
 import { dataService } from '../../services/dataService';
+import { EditTrainerProfileModal } from './EditTrainerProfileModal';
 
 interface AdminOwnerPortalProps {
   settings: GymSettings;
@@ -51,7 +52,8 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
   payments,
   auditLogs
 }) => {
-  const [activeTab, setActiveTab] = useState<'ANALYTICS' | 'MEMBERS' | 'PLANS' | 'ZONES' | 'CMS' | 'AUDIT'>('ANALYTICS');
+  const [activeTab, setActiveTab] = useState<'ANALYTICS' | 'MEMBERS' | 'TRAINERS' | 'PLANS' | 'ZONES' | 'CMS' | 'AUDIT'>('ANALYTICS');
+  const [selectedTrainerForEdit, setSelectedTrainerForEdit] = useState<UserProfile | null>(null);
   const [memberFilter, setMemberFilter] = useState<'ALL' | 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED' | 'FROZEN' | 'TRIAL'>('ALL');
   const [memberSearch, setMemberSearch] = useState('');
 
@@ -151,6 +153,7 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
         {[
           { id: 'ANALYTICS', label: 'Executive Analytics', icon: Activity },
           { id: 'MEMBERS', label: `Athletes (${members.length})`, icon: Users },
+          { id: 'TRAINERS', label: `Floor Coaches (${trainers.length})`, icon: Dumbbell },
           { id: 'PLANS', label: 'Membership Plans', icon: CreditCard },
           { id: 'ZONES', label: 'Floor Zones & Capacities', icon: Layers },
           { id: 'CMS', label: 'Website CMS Editor', icon: Globe },
@@ -342,6 +345,92 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: FLOOR COACHES & TRAINERS */}
+      {activeTab === 'TRAINERS' && (
+        <div className="space-y-6">
+          <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold">
+                  FLOOR COACHING ROSTER
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">{trainers.length} Active Coaches</span>
+              </div>
+              <h3 className="text-xl font-black text-white uppercase tracking-wide mt-1">
+                Coaches & Floor Specialists
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Manage coach profiles, photos, clinical specialties, and member assignments
+              </p>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {trainers.map((trainer) => {
+              const assignedCount = members.filter(
+                m => m.assignedTrainerId === trainer.id || m.assignedTrainerName === trainer.fullName
+              ).length;
+
+              return (
+                <div 
+                  key={trainer.id}
+                  className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 flex flex-col justify-between shadow-xl relative overflow-hidden group hover:border-zinc-700 transition"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="relative">
+                        <img
+                          src={trainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
+                          alt={trainer.fullName}
+                          referrerPolicy="no-referrer"
+                          className="w-20 h-20 rounded-2xl object-cover border-2 border-emerald-500/40 shadow-lg"
+                        />
+                        <span className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-full bg-emerald-500 text-black text-[9px] font-black uppercase tracking-wider font-mono">
+                          Coach
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedTrainerForEdit(trainer)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-emerald-500 hover:text-black border border-zinc-700 hover:border-emerald-500 text-zinc-300 text-xs font-bold transition shadow-sm"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit Profile</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-4">
+                      <h4 className="text-lg font-black text-white">{trainer.fullName}</h4>
+                      <div className="text-xs text-emerald-400 font-semibold mt-0.5">
+                        {trainer.fitnessGoal || 'Floor Strength Specialist'}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 font-mono mt-1">
+                        {trainer.phone || 'No phone set'}
+                      </div>
+                      {trainer.experience && (
+                        <div className="mt-2 inline-block px-2.5 py-0.5 rounded-lg bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 font-mono font-medium">
+                          {trainer.experience}
+                        </div>
+                      )}
+                      <p className="text-xs text-zinc-400 mt-3 leading-relaxed border-t border-zinc-900 pt-3">
+                        {trainer.trainerNotes || 'Specialized floor trainer and movement screening coach.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-3 border-t border-zinc-800/80 flex items-center justify-between text-xs">
+                    <span className="text-zinc-500">Assigned Athletes:</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-emerald-400 font-mono font-bold">
+                      {assignedCount} Members
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -714,6 +803,18 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
             </form>
           </div>
         </div>
+      )}
+      {/* Edit Trainer Profile Modal */}
+      {selectedTrainerForEdit && (
+        <EditTrainerProfileModal
+          trainer={selectedTrainerForEdit}
+          isOpen={true}
+          onClose={() => setSelectedTrainerForEdit(null)}
+          onSave={(updated) => {
+            dataService.updateTrainer(updated);
+            setSelectedTrainerForEdit(null);
+          }}
+        />
       )}
     </div>
   );

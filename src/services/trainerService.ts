@@ -3,7 +3,10 @@ import {
   getDocs, 
   onSnapshot, 
   query, 
-  where 
+  where,
+  doc,
+  setDoc,
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { UserProfile } from '../types';
@@ -26,6 +29,18 @@ export const trainerService = {
     } catch (error) {
       console.warn('Could not read trainers from Firestore, using initial:', error);
       return INITIAL_TRAINERS;
+    }
+  },
+
+  async updateTrainer(trainer: UserProfile): Promise<void> {
+    try {
+      const ref = doc(db, PROFILES_COLLECTION, trainer.id);
+      await setDoc(ref, {
+        ...trainer,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (error) {
+      console.warn('Could not persist trainer update to Firestore:', error);
     }
   },
 

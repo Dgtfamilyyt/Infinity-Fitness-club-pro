@@ -209,6 +209,21 @@ class DataService {
     } else {
       list.push(profile);
     }
+    if (profile.role === 'trainer') {
+      trainerService.updateTrainer(profile).catch(e => console.warn('Could not persist trainer:', e));
+    }
+    this.notify();
+  }
+
+  updateTrainer(trainer: UserProfile): void {
+    const idx = this.trainers.findIndex(t => t.id === trainer.id || t.email.toLowerCase() === trainer.email.toLowerCase());
+    if (idx >= 0) {
+      this.trainers[idx] = { ...this.trainers[idx], ...trainer };
+    } else {
+      this.trainers.push(trainer);
+    }
+    trainerService.updateTrainer(trainer).catch(e => console.warn('Could not persist trainer:', e));
+    this.addAudit(trainer.fullName, 'TRAINER_PROFILE_UPDATED', 'UserProfile', trainer.id, `Profile details & photo updated for ${trainer.fullName}`);
     this.notify();
   }
 

@@ -103,8 +103,12 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
         onSuccess(user.email || '');
       }
     } catch (err: any) {
-      console.error('Google sign-in error:', err);
       const parsed = parseAuthError(err);
+      if (parsed.isCancelled) {
+        // User closed or dismissed the popup window - normal user action, reset quietly
+        return;
+      }
+      console.error('Google sign-in error:', err);
       setErrorMessage(parsed.message);
       if (parsed.isPopupBlocked) {
         setPopupBlocked(true);
@@ -126,8 +130,12 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
     try {
       await signInWithGoogleRedirect();
     } catch (err: any) {
-      console.error('Google redirect error:', err);
       const parsed = parseAuthError(err);
+      if (parsed.isCancelled) {
+        setGoogleLoading(false);
+        return;
+      }
+      console.error('Google redirect error:', err);
       setErrorMessage(parsed.message);
       if (parsed.isOperationNotAllowed) {
         setShowProviderNotice(true);

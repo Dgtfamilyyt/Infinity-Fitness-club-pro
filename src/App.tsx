@@ -9,6 +9,7 @@ import {
   saveUserProfile, 
   logoutUser,
   subscribeToAuth,
+  initAuthRedirect,
   AppAuthUser
 } from './lib/firebase';
 import { Navbar } from './components/layout/Navbar';
@@ -101,8 +102,11 @@ export default function App() {
     }
   }, []);
 
-  // Listen to Auth state (Firebase + fallback session)
+  // Listen to Auth state (Firebase Auth)
   useEffect(() => {
+    // Process redirect result if arriving from a mobile/browser redirect auth flow
+    initAuthRedirect().catch(() => {});
+
     const unsubscribe = subscribeToAuth(async (authUser: AppAuthUser | null) => {
       setAuthLoading(true);
 
@@ -448,6 +452,11 @@ export default function App() {
             activeSessions={activeSessions}
             members={members}
             workout={workout}
+            onUpdateTrainer={(updated) => {
+              if (currentUser && (currentUser.id === updated.id || currentUser.email.toLowerCase() === updated.email.toLowerCase())) {
+                setCurrentUser(updated);
+              }
+            }}
           />
         )}
 

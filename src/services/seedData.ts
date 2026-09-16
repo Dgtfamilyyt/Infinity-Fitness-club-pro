@@ -198,10 +198,10 @@ export const INITIAL_TRAINERS: UserProfile[] = [
     phone: '+91 98112 00111',
     role: 'trainer',
     isActive: true,
-    avatarUrl: 'https://images.unsplash.com/photo-1567013127542-490d757e51fc?w=150&auto=format&fit=crop&q=80',
-    experience: 'Athlete',
-    fitnessGoal: 'CSCS & Strength Conditioning Specialist',
-    trainerNotes: 'Specializes in hypertrophy, biomechanics, and strength periodization.'
+    avatarUrl: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80',
+    experience: 'Master Coach & Physique Athlete',
+    fitnessGoal: 'Head Strength & Physique Coach',
+    trainerNotes: 'Specializes in hypertrophy, biomechanics, functional strength periodization, and injury prevention.'
   },
   {
     id: 'trainer-priya',

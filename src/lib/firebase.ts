@@ -177,7 +177,9 @@ export const signInWithGoogle = async (forceRedirect: boolean = false): Promise<
       emailVerified: result.user.emailVerified
     };
   } catch (err: any) {
-    console.warn('signInWithPopup failed:', err?.code, err?.message);
+    if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+      console.warn('signInWithPopup failed:', err?.code, err?.message);
+    }
     throw err;
   }
 };
@@ -201,8 +203,10 @@ export const initAuthRedirect = async (): Promise<AppAuthUser | null> => {
     }
     return null;
   } catch (err: any) {
-    console.error('getRedirectResult failed:', err);
-    throw err;
+    if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+      console.warn('getRedirectResult notice:', err);
+    }
+    return null;
   }
 };
 

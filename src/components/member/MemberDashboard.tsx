@@ -17,12 +17,16 @@ import {
   LogOut,
   Home,
   ShieldAlert,
-  ExternalLink
+  ExternalLink,
+  History
 } from 'lucide-react';
 import { UserProfile, WorkoutAssignment, GymZone, PersonalRecord, AttendanceRecord } from '../../types';
 import { dataService } from '../../services/dataService';
+import { generateCryptographicQrToken, isValidQrTokenFormat } from '../../services/qrService';
 import { QRCodeModal } from '../common/QRCodeModal';
 import { LiveFloorStatus } from '../common/LiveFloorStatus';
+import { WorkoutHistoryView } from './WorkoutHistoryView';
+import { MonthlyCalendarView } from './MonthlyCalendarView';
 
 interface MemberDashboardProps {
   member: UserProfile;
@@ -44,14 +48,32 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
   onLogout
 }) => {
   const [showQR, setShowQR] = useState(false);
-  const [activeTab, setActiveTab] = useState<'HOME' | 'WORKOUT' | 'PROGRESS' | 'ATTENDANCE' | 'PROFILE'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'CALENDAR' | 'WORKOUT' | 'PROGRESS' | 'ATTENDANCE' | 'PROFILE'>('HOME');
+  const [workoutSubTab, setWorkoutSubTab] = useState<'CURRENT' | 'PAST'>('PAST');
+  const [activeQrToken, setActiveQrToken] = useState<string>(() => {
+    return member.qrToken && isValidQrTokenFormat(member.qrToken) ? member.qrToken : '';
+  });
+
+  const handleOpenCheckInQR = () => {
+    let token = activeQrToken || member.qrToken;
+    if (!token || !isValidQrTokenFormat(token)) {
+      token = generateCryptographicQrToken();
+      dataService.upsertProfile({ ...member, qrToken: token });
+    }
+    setActiveQrToken(token);
+    setShowQR(true);
+  };
 
   const handleToggleExercise = (exerciseId: string) => {
     dataService.toggleExerciseComplete(exerciseId);
   };
 
-  const memberPRs = prs.filter(p => p.memberId === member.id);
-  const memberAttendance = attendanceLogs.filter(a => a.memberId === member.id);
+  const memberPRs = prs.filter(p => p.memberId === member.id || (member.memberId && p.memberId === member.memberId));
+  const memberAttendance = attendanceLogs.filter(
+    a => a.memberId === member.id || 
+         (member.memberId && a.memberId === member.memberId) ||
+         (a.memberName && member.fullName && a.memberName.toLowerCase() === member.fullName.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 pb-28 md:pb-12">
@@ -81,7 +103,8 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
 
             {/* QR Check-In Pass Button */}
             <button
-              onClick={() => setShowQR(true)}
+              id="header-digital-pass-btn"
+              onClick={handleOpenCheckInQR}
               className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs tracking-wider uppercase transition shadow-lg shadow-emerald-500/10 min-h-[40px]"
             >
               <QrCode className="w-4 h-4" />
@@ -108,9 +131,10 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         <div className="hidden md:flex items-center gap-2 border-b border-zinc-800 pb-3 overflow-x-auto">
           {[
             { id: 'HOME', label: 'Dashboard' },
-            { id: 'WORKOUT', label: "Today's Workout" },
+            { id: 'CALENDAR', label: 'Monthly Calendar' },
+            { id: 'WORKOUT', label: 'Workout History' },
             { id: 'PROGRESS', label: 'PRs & Progress' },
-            { id: 'ATTENDANCE', label: 'Attendance' },
+            { id: 'ATTENDANCE', label: 'Attendance Logs' },
             { id: 'PROFILE', label: 'Athlete Profile' }
           ].map((tab) => (
             <button
@@ -194,16 +218,32 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
 
                 {/* Exercises Check-off Preview */}
                 <div className="mt-2">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
                       Exercise Breakdown ({workout.exercises.filter(e => e.completed).length}/{workout.exercises.length} Complete)
                     </h3>
-                    <button 
-                      onClick={() => setActiveTab('WORKOUT')}
-                      className="text-xs text-emerald-400 font-semibold hover:underline flex items-center gap-1"
-                    >
-                      View Full Details <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <button 
+                        onClick={() => {
+                          setWorkoutSubTab('PAST');
+                          setActiveTab('WORKOUT');
+                        }}
+                        className="text-xs text-zinc-400 hover:text-white font-semibold flex items-center gap-1.5 transition px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700"
+                      >
+                        <History className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Past Records</span>
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setWorkoutSubTab('CURRENT');
+                          setActiveTab('WORKOUT');
+                        }}
+                        className="text-xs text-emerald-400 font-semibold hover:underline flex items-center gap-1"
+                      >
+                        <span>Today's Routine</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -300,6 +340,32 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                 </div>
               </div>
 
+              {/* Monthly Schedule & Calendar Quick-Access Card */}
+              <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-5 shadow-xl relative overflow-hidden group">
+                <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-white">Monthly Schedule</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                    {memberAttendance.length} Logged
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2.5">
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Interactive monthly calendar mapping scheduled split programming against verified floor check-in dates.
+                  </p>
+                  <button
+                    id="home-open-monthly-calendar-btn"
+                    onClick={() => setActiveTab('CALENDAR')}
+                    className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95"
+                  >
+                    <span>Open Monthly Calendar</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
               {/* Safety & Restrictions Info */}
               {member.restrictions && member.restrictions !== 'None' && (
                 <div className="rounded-2xl bg-amber-950/20 border border-amber-500/30 p-4 text-xs">
@@ -317,86 +383,29 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
           </div>
         )}
 
-        {/* TAB 2: DETAILED WORKOUT VIEW */}
+        {/* TAB: MONTHLY CALENDAR VIEW */}
+        {activeTab === 'CALENDAR' && (
+          <MonthlyCalendarView
+            member={member}
+            currentWorkout={workout}
+            attendanceLogs={attendanceLogs}
+            personalRecords={prs}
+            zones={zones}
+            onToggleExercise={handleToggleExercise}
+            onOpenCheckInQR={handleOpenCheckInQR}
+          />
+        )}
+
+        {/* TAB 2: WORKOUT HISTORY & CURRENT ROUTINE */}
         {activeTab === 'WORKOUT' && (
-          <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Complete Routine</span>
-                <h2 className="text-2xl font-black text-white uppercase mt-1">{workout.title}</h2>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Target: {workout.targetMuscles.join(', ')} • Designated Zone: {workout.zoneName}
-                </p>
-              </div>
-
-              <div className="px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
-                <span className="text-zinc-400">Session Progress:</span>{' '}
-                <strong className="text-emerald-400 font-mono text-sm">{workout.completionPercentage}%</strong>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {workout.exercises.map((ex, idx) => (
-                <div
-                  key={ex.id}
-                  className={`p-5 rounded-2xl border transition ${
-                    ex.completed
-                      ? 'bg-emerald-950/15 border-emerald-500/30'
-                      : 'bg-zinc-900/60 border-zinc-800 hover:border-zinc-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3.5">
-                      <button
-                        onClick={() => handleToggleExercise(ex.id)}
-                        className="mt-0.5"
-                      >
-                        {ex.completed ? (
-                          <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-                        ) : (
-                          <Circle className="w-6 h-6 text-zinc-600 hover:text-emerald-400 transition" />
-                        )}
-                      </button>
-
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-emerald-400 font-bold">0{idx + 1}</span>
-                          <h4 className={`text-base font-bold ${ex.completed ? 'line-through text-zinc-500' : 'text-white'}`}>
-                            {ex.name}
-                          </h4>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
-                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 font-semibold font-mono">
-                            {ex.sets} Sets
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 font-semibold font-mono">
-                            {ex.reps} Reps
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-emerald-400 font-semibold font-mono">
-                            {ex.restSeconds}s Rest
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-400">
-                            {ex.equipment}
-                          </span>
-                        </div>
-
-                        <p className="mt-3 text-xs text-zinc-400 leading-relaxed max-w-2xl">
-                          {ex.instructions}
-                        </p>
-
-                        {ex.notes && (
-                          <div className="mt-2 text-[11px] text-amber-400/90 font-medium">
-                            Trainer Note: {ex.notes}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <WorkoutHistoryView
+            member={member}
+            currentWorkout={workout}
+            attendanceLogs={attendanceLogs}
+            personalRecords={prs}
+            onToggleExercise={handleToggleExercise}
+            initialSubTab={workoutSubTab}
+          />
         )}
 
         {/* TAB 3: PROGRESS & PRS */}
@@ -432,14 +441,24 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         {/* TAB 4: ATTENDANCE HISTORY */}
         {activeTab === 'ATTENDANCE' && (
           <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl space-y-6">
-            <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
+            <div className="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Check-In Logs</span>
                 <h2 className="text-2xl font-black text-white uppercase mt-1">Club Attendance Log</h2>
               </div>
-              <div className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
-                <span className="text-zinc-400">Total Visits:</span>{' '}
-                <strong className="text-white font-mono">{memberAttendance.length}</strong>
+              <div className="flex items-center gap-2">
+                <button
+                  id="attendance-switch-calendar-btn"
+                  onClick={() => setActiveTab('CALENDAR')}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Switch to Calendar View</span>
+                </button>
+                <div className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
+                  <span className="text-zinc-400">Visits:</span>{' '}
+                  <strong className="text-white font-mono">{memberAttendance.length}</strong>
+                </div>
               </div>
             </div>
 
@@ -573,20 +592,54 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         )}
       </div>
 
+      {/* Floating Action Button (FAB) for Quick Check-In QR Pass */}
+      <aside 
+        id="fab-checkin-container"
+        aria-label="Contactless Check-In QR Pass"
+        className="fixed bottom-20 right-4 md:bottom-8 md:right-8 z-40 flex items-center group"
+      >
+        {/* Context Tooltip Pill (Desktop Hover) */}
+        <div className="hidden sm:flex items-center mr-3 px-3.5 py-2 rounded-2xl bg-[#121214]/95 backdrop-blur-md border border-zinc-800 text-xs text-white font-semibold shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-2" />
+          <span className="text-zinc-400 mr-1.5 font-sans">Check-In Pass:</span>
+          <span className="text-emerald-400 font-mono font-bold">IFC1 QR</span>
+        </div>
+
+        {/* Floating Action Button */}
+        <button
+          id="fab-checkin-qr"
+          onClick={handleOpenCheckInQR}
+          className="relative flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-emerald-400 text-black shadow-2xl shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-105 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-[#0a0a0c]"
+          aria-label="Generate and open check-in QR code pass"
+          title="Open Check-In QR Pass"
+        >
+          {/* Subtle pulse ring animation */}
+          <span className="absolute -inset-1 rounded-2xl bg-emerald-500/25 animate-ping opacity-40 pointer-events-none" />
+          <QrCode className="w-7 h-7 relative z-10 stroke-[2.2]" />
+
+          {/* Verification Shield Indicator Dot */}
+          <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-zinc-900 border border-emerald-500/80 flex items-center justify-center text-[10px] text-emerald-400 font-bold shadow-md">
+            ✓
+          </span>
+        </button>
+      </aside>
+
       {/* QR Pass Modal */}
       <QRCodeModal
         member={member}
+        token={activeQrToken}
         isOpen={showQR}
         onClose={() => setShowQR(false)}
+        onRegenerateToken={(newToken) => setActiveQrToken(newToken)}
       />
 
       {/* Mobile App Bottom Navigation (Fixed, reachable, min 44px touch targets) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#121214]/95 backdrop-blur-lg border-t border-zinc-800 px-2 py-1 flex items-center justify-around shadow-2xl">
         {[
           { id: 'HOME', label: 'Home', icon: Home },
-          { id: 'WORKOUT', label: 'Workout', icon: Dumbbell },
-          { id: 'PROGRESS', label: 'Progress', icon: Trophy },
-          { id: 'ATTENDANCE', label: 'Logs', icon: Calendar },
+          { id: 'CALENDAR', label: 'Calendar', icon: Calendar },
+          { id: 'WORKOUT', label: 'Workouts', icon: History },
+          { id: 'PROGRESS', label: 'PRs', icon: Trophy },
           { id: 'PROFILE', label: 'Profile', icon: User }
         ].map((tab) => {
           const Icon = tab.icon;

@@ -23,7 +23,7 @@ export interface UserProfile {
   assignedTrainerId?: string;
   assignedTrainerName?: string;
   fitnessGoal?: string;
-  experience?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Athlete';
+  experience?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Athlete' | string;
   workoutFrequency?: number; // days per week
   preferredTime?: string;
   emergencyContact?: string;

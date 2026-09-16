@@ -12,13 +12,15 @@ import {
   BrainCircuit, 
   UserCheck,
   Send,
-  Loader2
+  Loader2,
+  Edit3
 } from 'lucide-react';
 import { UserProfile, GymZone, ActiveGymSession, WorkoutAssignment } from '../../types';
 import { dataService } from '../../services/dataService';
 import { QRScannerModal } from '../common/QRScannerModal';
 import { TrainerOverrideModal } from '../common/TrainerOverrideModal';
 import { LiveFloorStatus } from '../common/LiveFloorStatus';
+import { EditTrainerProfileModal } from './EditTrainerProfileModal';
 import { consultWorkoutSafetyAdvisor } from '../../services/aiAdvisor';
 
 interface TrainerPortalProps {
@@ -27,6 +29,7 @@ interface TrainerPortalProps {
   activeSessions: ActiveGymSession[];
   members: UserProfile[];
   workout: WorkoutAssignment;
+  onUpdateTrainer?: (trainer: UserProfile) => void;
 }
 
 export const TrainerPortal: React.FC<TrainerPortalProps> = ({
@@ -34,9 +37,11 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
   zones,
   activeSessions,
   members,
-  workout
+  workout,
+  onUpdateTrainer
 }) => {
   const [showScanner, setShowScanner] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [selectedMemberForOverride, setSelectedMemberForOverride] = useState<UserProfile | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
 
@@ -83,11 +88,22 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
       {/* Top Banner */}
       <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <img
-            src={currentTrainer.avatarUrl || 'https://images.unsplash.com/photo-1567013127542-490d757e51fc?w=150'}
-            alt={currentTrainer.fullName}
-            className="w-12 h-12 rounded-xl object-cover border border-emerald-500/40"
-          />
+          <button 
+            type="button"
+            onClick={() => setShowEditProfile(true)}
+            className="relative group rounded-xl overflow-hidden cursor-pointer"
+            title="Click to change trainer profile photo"
+          >
+            <img
+              src={currentTrainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
+              alt={currentTrainer.fullName}
+              referrerPolicy="no-referrer"
+              className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-500/40 group-hover:border-emerald-400 transition"
+            />
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+              <Camera className="w-5 h-5 text-white" />
+            </div>
+          </button>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-black text-white uppercase">{currentTrainer.fullName}</h2>
@@ -95,11 +111,22 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
                 TRAINER PORTAL
               </span>
             </div>
-            <p className="text-xs text-zinc-400 mt-0.5">{currentTrainer.fitnessGoal || 'Certified Strength Specialist'}</p>
+            <p className="text-xs text-zinc-400 mt-0.5">{currentTrainer.fitnessGoal || 'Head Strength & Conditioning Coach'}</p>
+            {currentTrainer.experience && (
+              <span className="text-[10px] text-zinc-500 font-mono block mt-0.5">{currentTrainer.experience}</span>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowEditProfile(true)}
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-emerald-500/50 text-white font-bold text-xs uppercase tracking-wider transition"
+          >
+            <Edit3 className="w-4 h-4 text-emerald-400" />
+            <span>Edit Profile</span>
+          </button>
+
           <button
             onClick={() => setShowScanner(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-500/10"
@@ -304,6 +331,17 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
           trainerName={currentTrainer.fullName}
         />
       )}
+
+      {/* Edit Trainer Profile Modal */}
+      <EditTrainerProfileModal
+        trainer={currentTrainer}
+        isOpen={showEditProfile}
+        onClose={() => setShowEditProfile(false)}
+        onSave={(updated) => {
+          dataService.updateTrainer(updated);
+          onUpdateTrainer?.(updated);
+        }}
+      />
     </div>
   );
 };
