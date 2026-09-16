@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/__/auth/:path*",
-      "destination": "https://swift-fx-h1ttq.firebaseapp.com/__/auth/:path*"
+      "destination": "https://infinity-fitness-club-52c50.firebaseapp.com/__/auth/:path*"
     },
     {
       "source": "/(.*)",

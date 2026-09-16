@@ -24,6 +24,7 @@ import {
   INITIAL_PERSONAL_RECORDS,
   INITIAL_ATTENDANCE_LOGS
 } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 import { evaluateWorkoutAssignment } from './workoutEngine';
 import { gymSettingsService } from './gymSettingsService';
 import { zoneService } from './zoneService';
@@ -46,16 +47,16 @@ class DataService {
   private settings: GymSettings = INITIAL_GYM_SETTINGS;
   private zones: GymZone[] = INITIAL_ZONES;
   private plans: MembershipPlan[] = INITIAL_PLANS;
-  private members: UserProfile[] = INITIAL_MEMBERS;
-  private trainers: UserProfile[] = INITIAL_TRAINERS;
-  private staff: UserProfile[] = INITIAL_STAFF;
-  private activeSessions: ActiveGymSession[] = INITIAL_ACTIVE_SESSIONS;
+  private members: UserProfile[] = isDevDemoEnabled() ? INITIAL_MEMBERS : [];
+  private trainers: UserProfile[] = isDevDemoEnabled() ? INITIAL_TRAINERS : [];
+  private staff: UserProfile[] = isDevDemoEnabled() ? INITIAL_STAFF : [];
+  private activeSessions: ActiveGymSession[] = isDevDemoEnabled() ? INITIAL_ACTIVE_SESSIONS : [];
   private arunWorkout: WorkoutAssignment = INITIAL_TODAY_WORKOUT_ARUN;
   private currentUserWorkout: WorkoutAssignment | null = null;
   private currentAuthUser: UserProfile | null = null;
-  private payments: PaymentRecord[] = INITIAL_PAYMENTS;
-  private personalRecords: PersonalRecord[] = INITIAL_PERSONAL_RECORDS;
-  private attendanceLogs: AttendanceRecord[] = INITIAL_ATTENDANCE_LOGS;
+  private payments: PaymentRecord[] = isDevDemoEnabled() ? INITIAL_PAYMENTS : [];
+  private personalRecords: PersonalRecord[] = isDevDemoEnabled() ? INITIAL_PERSONAL_RECORDS : [];
+  private attendanceLogs: AttendanceRecord[] = isDevDemoEnabled() ? INITIAL_ATTENDANCE_LOGS : [];
   private auditLogs: AuditLog[] = [
     {
       id: 'audit-1',

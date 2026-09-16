@@ -202,16 +202,14 @@ service cloud.firestore {
         isStaff() || 
         resource.data.memberId == myUid() || 
         resource.data.memberUid == myUid() ||
-        (hasProfile() && resource.data.memberId == getUserProfile().memberId) ||
-        assignmentId == 'wa-arun-today'
+        (hasProfile() && resource.data.memberId == getUserProfile().memberId)
       );
 
       allow create: if isBootstrap() || isStaff() || (
         signedIn() && (
           request.resource.data.memberId == myUid() || 
           request.resource.data.memberUid == myUid() ||
-          (hasProfile() && request.resource.data.memberId == getUserProfile().memberId) ||
-          assignmentId == 'wa-arun-today'
+          (hasProfile() && request.resource.data.memberId == getUserProfile().memberId)
         )
       );
 
@@ -219,8 +217,7 @@ service cloud.firestore {
         isStaff() || 
         resource.data.memberId == myUid() || 
         resource.data.memberUid == myUid() ||
-        (hasProfile() && resource.data.memberId == getUserProfile().memberId) ||
-        assignmentId == 'wa-arun-today'
+        (hasProfile() && resource.data.memberId == getUserProfile().memberId)
       );
 
       allow delete: if isAdminOrOwner();

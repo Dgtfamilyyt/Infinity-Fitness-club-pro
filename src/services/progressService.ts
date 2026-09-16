@@ -12,6 +12,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { PersonalRecord } from '../types';
 import { INITIAL_PERSONAL_RECORDS } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 
@@ -26,11 +27,13 @@ export const progressService = {
       }
       const snap = await getDocs(q);
       if (snap.empty) {
+        if (!isDevDemoEnabled()) return [];
         return memberId ? INITIAL_PERSONAL_RECORDS.filter(p => p.memberId === memberId) : INITIAL_PERSONAL_RECORDS;
       }
       return snap.docs.map(d => ({ ...d.data(), id: d.id } as PersonalRecord));
     } catch (error) {
-      console.warn('Could not load personal records from Firestore, using initial:', error);
+      console.warn('Could not load personal records from Firestore:', error);
+      if (!isDevDemoEnabled()) return [];
       return INITIAL_PERSONAL_RECORDS;
     }
   },
@@ -43,12 +46,12 @@ export const progressService = {
         if (!snap.empty) {
           callback(snap.docs.map(d => ({ ...d.data(), id: d.id } as PersonalRecord)));
         } else {
-          callback(INITIAL_PERSONAL_RECORDS.filter(p => p.memberId === memberId));
+          callback(isDevDemoEnabled() ? INITIAL_PERSONAL_RECORDS.filter(p => p.memberId === memberId) : []);
         }
       },
       (error) => {
         console.warn('PR snapshot listener error:', error);
-        callback(INITIAL_PERSONAL_RECORDS.filter(p => p.memberId === memberId));
+        callback(isDevDemoEnabled() ? INITIAL_PERSONAL_RECORDS.filter(p => p.memberId === memberId) : []);
       }
     );
   },

@@ -14,6 +14,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { INITIAL_TRAINERS, INITIAL_STAFF } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 
@@ -31,12 +32,12 @@ export const staffService = {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return [...INITIAL_STAFF, ...INITIAL_TRAINERS];
+        return isDevDemoEnabled() ? [...INITIAL_STAFF, ...INITIAL_TRAINERS] : [];
       }
       return snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
     } catch (error) {
-      console.warn('Could not read staff from Firestore, fallback to initial:', error);
-      return [...INITIAL_STAFF, ...INITIAL_TRAINERS];
+      console.warn('Could not read staff from Firestore:', error);
+      return isDevDemoEnabled() ? [...INITIAL_STAFF, ...INITIAL_TRAINERS] : [];
     }
   },
 
@@ -55,12 +56,12 @@ export const staffService = {
           const staff = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
           callback(staff);
         } else {
-          callback([...INITIAL_STAFF, ...INITIAL_TRAINERS]);
+          callback(isDevDemoEnabled() ? [...INITIAL_STAFF, ...INITIAL_TRAINERS] : []);
         }
       },
       (error) => {
         console.warn('Staff snapshot listener warning:', error);
-        callback([...INITIAL_STAFF, ...INITIAL_TRAINERS]);
+        callback(isDevDemoEnabled() ? [...INITIAL_STAFF, ...INITIAL_TRAINERS] : []);
       }
     );
   },
@@ -80,12 +81,12 @@ export const staffService = {
           const trainers = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
           callback(trainers);
         } else {
-          callback(INITIAL_TRAINERS);
+          callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
         }
       },
       (error) => {
         console.warn('Trainers snapshot listener warning:', error);
-        callback(INITIAL_TRAINERS);
+        callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
       }
     );
   },

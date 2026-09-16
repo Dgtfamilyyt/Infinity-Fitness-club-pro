@@ -12,6 +12,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { PaymentRecord } from '../types';
 import { INITIAL_PAYMENTS } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 
@@ -27,12 +28,12 @@ export const paymentService = {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return INITIAL_PAYMENTS;
+        return isDevDemoEnabled() ? INITIAL_PAYMENTS : [];
       }
       return snap.docs.map(d => ({ ...d.data(), id: d.id } as PaymentRecord));
     } catch (error) {
-      console.warn('Could not read payments from Firestore, using initial:', error);
-      return INITIAL_PAYMENTS;
+      console.warn('Could not read payments from Firestore:', error);
+      return isDevDemoEnabled() ? INITIAL_PAYMENTS : [];
     }
   },
 
@@ -48,12 +49,12 @@ export const paymentService = {
           const payments = snap.docs.map(d => ({ ...d.data(), id: d.id } as PaymentRecord));
           callback(payments);
         } else {
-          callback(INITIAL_PAYMENTS);
+          callback(isDevDemoEnabled() ? INITIAL_PAYMENTS : []);
         }
       },
       (error) => {
         console.warn('Payments snapshot error:', error);
-        callback(INITIAL_PAYMENTS);
+        callback(isDevDemoEnabled() ? INITIAL_PAYMENTS : []);
       }
     );
   },

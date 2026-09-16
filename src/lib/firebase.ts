@@ -13,7 +13,6 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
-  initializeFirestore,
   doc, 
   getDoc, 
   getDocFromServer,
@@ -25,7 +24,8 @@ import {
   getDocs,
   serverTimestamp
 } from 'firebase/firestore';
-import appletConfig from '../../firebase-applet-config.json';
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import { getStorage } from 'firebase/storage';
 import { UserProfile, UserRole } from '../types';
 
 // Detect whether running on Vercel production domain to enable same-origin proxy auth handler
@@ -33,17 +33,18 @@ export const getAuthDomain = (): string => {
   if (typeof window !== 'undefined' && window.location.hostname === 'infinity-fitness-club-pro.vercel.app') {
     return 'infinity-fitness-club-pro.vercel.app';
   }
-  return 'swift-fx-h1ttq.firebaseapp.com';
+  return 'infinity-fitness-club-52c50.firebaseapp.com';
 };
 
-// Configuration for Firebase Modular Web SDK
+// Configuration for Firebase Modular Web SDK (infinity-fitness-club-52c50)
 export const firebaseConfig = {
-  apiKey: "AIzaSyDknL2K2XWB65uh01Ko_RUIue5AMVpImG8",
-  authDomain: getAuthDomain(),
-  projectId: "swift-fx-h1ttq",
-  storageBucket: "swift-fx-h1ttq.firebasestorage.app",
-  messagingSenderId: "18005381258",
-  appId: "1:18005381258:web:fb1c44daa496409249dd73"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCLh948sZvd74VWRwFMw-hJxu5anPtQ7-8",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || getAuthDomain(),
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "infinity-fitness-club-52c50",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "infinity-fitness-club-52c50.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "880588845668",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:880588845668:web:da7b27c1ac83ad2f33a571",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-V01RT496K8"
 };
 
 // Initialize safely so Firebase is not initialized twice during development/HMR
@@ -51,24 +52,25 @@ const app = getApps().length === 0
   ? initializeApp(firebaseConfig) 
   : getApp();
 
-const firestoreDatabaseId = (appletConfig as any)?.firestoreDatabaseId;
+// Use the default Firestore database for infinity-fitness-club-52c50
+export const db = getFirestore(app);
 
-// Initialize Firestore with robust long-polling to prevent 10s backend connection timeouts in proxied / iframe environments
-export const db = (() => {
-  try {
-    return initializeFirestore(
-      app,
-      {
-        experimentalForceLongPolling: true,
-      },
-      firestoreDatabaseId || undefined
-    );
-  } catch {
-    return firestoreDatabaseId
-      ? getFirestore(app, firestoreDatabaseId)
-      : getFirestore(app);
-  }
-})();
+// Initialize Firebase Storage
+export const storage = getStorage(app);
+
+// Safe optional Firebase Analytics (browser-only, never breaks execution)
+export let analytics: any = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      try {
+        analytics = getAnalytics(app);
+      } catch (err) {
+        console.warn('Firebase Analytics notice (optional):', err);
+      }
+    }
+  }).catch(() => {});
+}
 
 // Validate Connection to Firestore (Firebase Integration Skill constraint)
 async function testFirestoreConnection() {

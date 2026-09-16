@@ -11,6 +11,7 @@ import {
 import { db } from '../lib/firebase';
 import { UserProfile } from '../types';
 import { INITIAL_TRAINERS } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 
 const PROFILES_COLLECTION = 'profiles';
 
@@ -23,12 +24,12 @@ export const trainerService = {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return INITIAL_TRAINERS;
+        return isDevDemoEnabled() ? INITIAL_TRAINERS : [];
       }
       return snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
     } catch (error) {
-      console.warn('Could not read trainers from Firestore, using initial:', error);
-      return INITIAL_TRAINERS;
+      console.warn('Could not read trainers from Firestore:', error);
+      return isDevDemoEnabled() ? INITIAL_TRAINERS : [];
     }
   },
 
@@ -56,12 +57,12 @@ export const trainerService = {
           const trainers = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
           callback(trainers);
         } else {
-          callback(INITIAL_TRAINERS);
+          callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
         }
       },
       (error) => {
         console.warn('Trainers snapshot listener error:', error);
-        callback(INITIAL_TRAINERS);
+        callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
       }
     );
   }

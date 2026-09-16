@@ -13,6 +13,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile, MemberStatus } from '../types';
 import { INITIAL_MEMBERS } from './seedData';
+import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 import { generateCryptographicQrToken, hashQrToken } from './qrService';
@@ -30,12 +31,12 @@ export const memberService = {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return INITIAL_MEMBERS;
+        return isDevDemoEnabled() ? INITIAL_MEMBERS : [];
       }
       return snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
     } catch (error) {
-      console.warn('Could not read members from Firestore, using initial:', error);
-      return INITIAL_MEMBERS;
+      console.warn('Could not read members from Firestore:', error);
+      return isDevDemoEnabled() ? INITIAL_MEMBERS : [];
     }
   },
 
@@ -51,12 +52,12 @@ export const memberService = {
           const members = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
           callback(members);
         } else {
-          callback(INITIAL_MEMBERS);
+          callback(isDevDemoEnabled() ? INITIAL_MEMBERS : []);
         }
       },
       (error) => {
         console.warn('Members snapshot listener error:', error);
-        callback(INITIAL_MEMBERS);
+        callback(isDevDemoEnabled() ? INITIAL_MEMBERS : []);
       }
     );
   },

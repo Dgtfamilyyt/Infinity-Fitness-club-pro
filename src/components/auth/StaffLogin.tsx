@@ -183,12 +183,12 @@ export const StaffLogin: React.FC<StaffLoginProps> = ({
                     How to enable in 30 seconds:
                   </p>
                   <ol className="list-decimal pl-4 space-y-1 text-zinc-300">
-                    <li>Open Firebase Console for your project (<strong>swift-fx-h1ttq</strong>).</li>
+                    <li>Open Firebase Console for your project (<strong>infinity-fitness-club-52c50</strong>).</li>
                     <li>Go to <strong>Authentication → Sign-in method</strong>.</li>
                     <li>Click <strong>Google</strong> (or <strong>Email/Password</strong>) and toggle <strong>Enable</strong>.</li>
                   </ol>
                   <a
-                    href="https://console.firebase.google.com/project/swift-fx-h1ttq/authentication/providers"
+                    href="https://console.firebase.google.com/project/infinity-fitness-club-52c50/authentication/providers"
                     target="_blank"
                     rel="noopener noreferrer"
                     referrerPolicy="no-referrer"

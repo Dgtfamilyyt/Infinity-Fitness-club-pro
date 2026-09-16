@@ -9,14 +9,12 @@
  * It is completely isolated from production UI and only runs when explicitly invoked.
  */
 
-import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, 
   doc, 
   setDoc, 
   serverTimestamp 
 } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { db } from '../src/lib/firebase';
 import { 
   INITIAL_GYM_SETTINGS, 
   INITIAL_ZONES, 
@@ -30,11 +28,6 @@ import {
   INITIAL_PERSONAL_RECORDS 
 } from '../src/services/seedData';
 import { hashQrToken } from '../src/services/qrService';
-
-const app = initializeApp(firebaseConfig);
-const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
 
 async function runSeed() {
   console.log('🚀 [Seed] Beginning Infinity Fitness Club Firestore seeding...');

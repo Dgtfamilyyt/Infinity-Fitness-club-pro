@@ -218,37 +218,13 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
                 </p>
               </div>
 
-              {/* Error Notice & Firebase Provider Guide */}
+              {/* Error Notice */}
               {errorMessage && (
                 <div className="mb-5 p-3.5 rounded-xl bg-red-950/30 border border-red-500/30 text-red-300 text-xs space-y-2 animate-in fade-in">
                   <div className="flex items-start gap-2.5">
                     <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
                     <span className="leading-relaxed">{errorMessage}</span>
                   </div>
-
-                  {showProviderNotice && (
-                    <div className="pt-2 border-t border-red-500/20 text-[11px] text-zinc-300 space-y-2">
-                      <p className="font-semibold text-amber-300 flex items-center gap-1.5">
-                        <Info className="w-3.5 h-3.5" />
-                        How to enable in 30 seconds:
-                      </p>
-                      <ol className="list-decimal pl-4 space-y-1 text-zinc-300">
-                        <li>Open Firebase Console for your project (<strong>swift-fx-h1ttq</strong>).</li>
-                        <li>Go to <strong>Authentication → Sign-in method</strong>.</li>
-                        <li>Click <strong>Google</strong> (or <strong>Email/Password</strong>) and toggle <strong>Enable</strong>.</li>
-                      </ol>
-                      <a
-                        href="https://console.firebase.google.com/project/swift-fx-h1ttq/authentication/providers"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        referrerPolicy="no-referrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-bold underline mt-1"
-                      >
-                        <span>Open Firebase Console Providers</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-                  )}
                 </div>
               )}
 
