@@ -17,25 +17,11 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email != null ? request.auth.token.email : '';
     }
 
-    function isPreAuthorizedStaffEmail() {
+    // Emergency owner accounts strictly to prevent owner lockout during migration
+    function isEmergencyOwnerEmail() {
       return signedIn() && (
         myEmail() in [
           'owner@infinityfitnessclub.in',
-          'reception@infinityfitnessclub.in',
-          'rahul.sharma@infinityfitnessclub.in',
-          'priya.verma@infinityfitnessclub.in',
-          'vikram.singh@infinityfitnessclub.in',
-          'dgtfamilyyt8@gmail.com'
-        ] ||
-        myEmail().matches('.*@infinityfitnessclub\\.in$')
-      );
-    }
-
-    function isPreAuthorizedAdminEmail() {
-      return signedIn() && (
-        myEmail() in [
-          'owner@infinityfitnessclub.in',
-          'reception@infinityfitnessclub.in',
           'dgtfamilyyt8@gmail.com'
         ]
       );
@@ -59,42 +45,40 @@ service cloud.firestore {
 
     function isStaff() {
       return signedIn() && (
-        isPreAuthorizedStaffEmail() ||
+        isEmergencyOwnerEmail() ||
         (isAccountActive() && (myRole() in ['trainer', 'admin', 'owner']))
       );
     }
 
     function isTrainer() {
-      return signedIn() && (
-        (isPreAuthorizedStaffEmail() && myRole() == 'trainer') ||
-        (isAccountActive() && myRole() == 'trainer')
-      );
+      return signedIn() && isAccountActive() && myRole() == 'trainer';
     }
 
     function isAdmin() {
       return signedIn() && (
-        myEmail() == 'reception@infinityfitnessclub.in' ||
+        isEmergencyOwnerEmail() ||
         (isAccountActive() && myRole() == 'admin')
       );
     }
 
     function isOwner() {
       return signedIn() && (
-        myEmail() in ['owner@infinityfitnessclub.in', 'dgtfamilyyt8@gmail.com'] ||
+        isEmergencyOwnerEmail() ||
         (isAccountActive() && myRole() == 'owner')
       );
     }
 
     function isAdminOrOwner() {
       return signedIn() && (
-        isPreAuthorizedAdminEmail() ||
+        isEmergencyOwnerEmail() ||
         (isAccountActive() && (myRole() in ['admin', 'owner']))
       );
     }
 
     // Allows initial database setup before gyms/infinity-neelambur is provisioned
+    // STRICTLY restricted to emergency owner to prevent arbitrary or anonymous write access
     function isBootstrap() {
-      return !exists(/databases/$(database)/documents/gyms/infinity-neelambur);
+      return !exists(/databases/$(database)/documents/gyms/infinity-neelambur) && isEmergencyOwnerEmail();
     }
 
     // Health check endpoint
@@ -107,7 +91,7 @@ service cloud.firestore {
     // ==========================================
     match /gyms/{gymId} {
       allow read: if true;
-      allow write: if isBootstrap() || isAdminOrOwner();
+      allow write: if isAdminOrOwner();
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'whatsapp', 'altPhone', 'updatedAt']);
     }
 
@@ -116,7 +100,7 @@ service cloud.firestore {
     // ==========================================
     match /gym_zones/{zoneId} {
       allow read: if true;
-      allow write: if isBootstrap() || isStaff();
+      allow write: if isStaff();
     }
 
     // ==========================================
@@ -124,7 +108,7 @@ service cloud.firestore {
     // ==========================================
     match /membership_plans/{planId} {
       allow read: if true;
-      allow write: if isBootstrap() || isAdminOrOwner();
+      allow write: if isAdminOrOwner();
     }
 
     // ==========================================
@@ -135,42 +119,45 @@ service cloud.firestore {
       // Evaluated first so self-read never fails on missing doc or staff recursion
       allow read: if (request.auth != null && request.auth.uid == userId)
                   || isStaff()
-                  || (resource != null && resource.data.role == 'trainer')
-                  || isBootstrap();
+                  || (resource != null && resource.data.role == 'trainer');
 
-      allow create: if isBootstrap() || (signedIn() && (
+      allow create: if signedIn() && (
         isAdminOrOwner() || 
         isStaff() || 
-        (myUid() == userId && (
-          request.resource.data.role == 'member' ||
-          // Linking pre-registration doc where user's email matches
-          (
-            'email' in request.resource.data &&
-            request.auth.token.email != null &&
-            (request.resource.data.email == request.auth.token.email || request.resource.data.email == request.auth.token.email.lower())
-          )
-        ))
-      ));
+        // Strict temporary safe client-side member profile creation (Requirements 1, 2, 3)
+        (
+          myUid() == userId &&
+          request.resource.data.role == 'member' &&
+          request.resource.data.gymId == 'infinity-neelambur' &&
+          request.resource.data.isActive == true &&
+          request.resource.data.authUid == request.auth.uid &&
+          request.resource.data.authLinked == true &&
+          request.auth.token.email != null &&
+          request.resource.data.email == request.auth.token.email
+        )
+      );
 
-      allow update: if isBootstrap() || (signedIn() && (
+      allow update: if signedIn() && (
         isAdminOrOwner() ||
+        // Normal self-update for own profile: cannot modify privileged, structural, or link fields (Requirement 4)
         (myUid() == userId && (
           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
             'role', 'status', 'isActive', 'memberId', 'qrToken', 
             'membershipPlanId', 'planName', 'membershipStart', 'membershipExpiry', 
-            'assignedTrainerId', 'gymId'
+            'assignedTrainerId', 'gymId', 'authUid', 'authLinked'
           ])
         )) ||
-        // Linking pre-registration doc where user's email matches
+        // Controlled initial linking of member pre-registration document (Requirements 4, 7)
         (
+          resource.data.role == 'member' &&
           request.auth.token.email != null &&
-          (resource.data.email == request.auth.token.email || resource.data.email == request.auth.token.email.lower()) &&
+          resource.data.email == request.auth.token.email &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['authUid', 'authLinked', 'updatedAt']) &&
           request.resource.data.authUid == request.auth.uid &&
           request.resource.data.authLinked == true &&
           (!('authLinked' in resource.data) || resource.data.authLinked != true)
         )
-      ));
+      );
 
       allow delete: if isAdminOrOwner();
     }
@@ -180,7 +167,7 @@ service cloud.firestore {
     // ==========================================
     match /memberships/{membershipId} {
       allow read: if signedIn() && (resource.data.memberUid == myUid() || isStaff());
-      allow write: if isBootstrap() || isAdminOrOwner();
+      allow write: if isAdminOrOwner();
     }
 
     // ==========================================
@@ -188,7 +175,7 @@ service cloud.firestore {
     // ==========================================
     match /qr_tokens/{tokenHash} {
       allow read: if signedIn() && (isStaff() || (resource.data.memberUid == myUid()));
-      allow write: if isBootstrap() || isStaff();
+      allow write: if isStaff();
     }
 
     // ==========================================
@@ -227,7 +214,7 @@ service cloud.firestore {
         (hasProfile() && resource.data.memberId == getUserProfile().memberId)
       );
 
-      allow create: if isBootstrap() || isStaff() || (
+      allow create: if isStaff() || (
         signedIn() && (
           request.resource.data.memberId == myUid() || 
           request.resource.data.memberUid == myUid() ||
@@ -265,7 +252,7 @@ service cloud.firestore {
         isAdminOrOwner() || 
         resource.data.memberId == myUid()
       );
-      allow create: if isBootstrap() || isAdminOrOwner();
+      allow create: if isAdminOrOwner();
       allow update, delete: if false;
     }
 
@@ -277,7 +264,7 @@ service cloud.firestore {
         isStaff() || 
         resource.data.memberId == myUid()
       );
-      allow create, update: if isBootstrap() || isStaff();
+      allow create, update: if isStaff();
       allow delete: if isAdminOrOwner();
     }
 
@@ -298,7 +285,7 @@ service cloud.firestore {
     // ==========================================
     match /audit_logs/{logId} {
       allow read: if isAdminOrOwner();
-      allow create: if isBootstrap() || isStaff();
+      allow create: if isStaff();
       allow update, delete: if false;
     }
 
@@ -307,22 +294,22 @@ service cloud.firestore {
     // ==========================================
     match /pre_registration_links/{emailHash} {
       // Authenticated user can read ONLY their own pre-registration link
-      // Staff or bootstrap can also read
-      allow read: if isBootstrap() || isStaff() || (
+      // Staff can also read
+      allow read: if isStaff() || (
         signedIn() && 
         resource != null && 
         request.auth.token.email != null &&
-        (resource.data.emailNormalized == request.auth.token.email || resource.data.emailNormalized == request.auth.token.email.lower())
+        resource.data.emailNormalized == request.auth.token.email
       );
 
-      // Staff or bootstrap can create pre-registration links
-      allow create: if isBootstrap() || isStaff();
+      // Staff can create pre-registration links
+      allow create: if isStaff();
 
       // Authenticated user can link their own UID, or staff can update
-      allow update: if isBootstrap() || isStaff() || (
+      allow update: if isStaff() || (
         signedIn() &&
         request.auth.token.email != null &&
-        (resource.data.emailNormalized == request.auth.token.email || resource.data.emailNormalized == request.auth.token.email.lower()) &&
+        resource.data.emailNormalized == request.auth.token.email &&
         request.resource.data.authUid == request.auth.uid &&
         request.resource.data.authLinked == true &&
         (!('authLinked' in resource.data) || resource.data.authLinked != true) &&
