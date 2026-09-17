@@ -25,14 +25,12 @@ import { GymSettings } from '../../types';
 
 interface MemberLoginProps {
   settings: GymSettings;
-  onSuccess: (email: string) => void;
   onNavigateHome: () => void;
   onNavigateStaffLogin: () => void;
 }
 
 export const MemberLogin: React.FC<MemberLoginProps> = ({
   settings,
-  onSuccess,
   onNavigateHome,
   onNavigateStaffLogin
 }) => {
@@ -66,8 +64,9 @@ export const MemberLogin: React.FC<MemberLoginProps> = ({
     setShowProviderNotice(false);
 
     try {
-      const user = await signInWithEmail(email, password);
-      onSuccess(user.email || email);
+      await signInWithEmail(email, password);
+      // Successful authentication triggers onAuthStateChanged/subscribeToAuth in App.tsx,
+      // which resolves canonical profiles/{uid}, validates active status & role, and decides final route.
     } catch (err: any) {
       console.error('Auth error:', err);
       const parsed = parseAuthError(err);

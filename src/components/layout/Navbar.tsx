@@ -90,7 +90,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               {isStaff && (
                 <button
-                  onClick={onNavigateStaffLogin}
+                  onClick={onNavigateDashboard}
                   className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-emerald-400 font-extrabold text-xs uppercase tracking-wider transition flex items-center gap-1.5 border border-zinc-700 min-h-[40px]"
                 >
                   <ShieldCheck className="w-4 h-4" />

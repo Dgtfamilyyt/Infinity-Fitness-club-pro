@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { UserRole, UserProfile, MembershipPlan } from './types';
 import { dataService } from './services/dataService';
@@ -135,6 +135,44 @@ export default function App() {
       // In restricted iframe environments pushState might be restricted
     }
   }, []);
+
+  // Explicit trainer selection state for supervisor floor view (avoids trainers[0] impersonation)
+  const [selectedTrainerIdForStaff, setSelectedTrainerIdForStaff] = useState<string | null>(null);
+
+  // Strict Staff Subview Role Enforcement:
+  // - Trainer: strictly TRAINER only.
+  // - Admin: RECEPTION only (never ADMIN).
+  // - Owner: ADMIN, RECEPTION, TRAINER.
+  const effectiveStaffSubView = useMemo<'TRAINER' | 'RECEPTION' | 'ADMIN'>(() => {
+    if (!currentUser) return 'TRAINER';
+    if (currentUser.role === 'trainer') return 'TRAINER';
+    if (currentUser.role === 'admin') {
+      return staffSubView === 'ADMIN' ? 'RECEPTION' : staffSubView;
+    }
+    return staffSubView;
+  }, [currentUser, staffSubView]);
+
+  // Protected Route Guards - Enforce role-based access on active route
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (route === 'MEMBER_DASHBOARD') {
+      if (!currentUser || accountStatus !== 'OK' || currentUser.isActive !== true) {
+        navigateTo('MEMBER_LOGIN');
+      } else if (currentUser.role !== 'member') {
+        // Staff accounts cannot access member dashboard -> reroute to STAFF_PORTAL
+        navigateTo('STAFF_PORTAL');
+      }
+    } else if (route === 'STAFF_PORTAL') {
+      if (!currentUser || accountStatus !== 'OK' || currentUser.isActive !== true) {
+        navigateTo('STAFF_LOGIN');
+      } else if (currentUser.role === 'member') {
+        // Members cannot access staff portal -> show access denied
+        setAccountStatus('DENIED');
+        setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance.');
+      }
+    }
+  }, [route, currentUser, accountStatus, authLoading, navigateTo]);
 
   // Listen to Auth state (Firebase Auth)
   useEffect(() => {
@@ -674,9 +712,6 @@ export default function App() {
       <>
         <MemberLogin
           settings={settings}
-          onSuccess={() => {
-            navigateTo('MEMBER_DASHBOARD');
-          }}
           onNavigateHome={() => navigateTo('HOME')}
           onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
         />
@@ -691,9 +726,6 @@ export default function App() {
       <>
         <StaffLogin
           settings={settings}
-          onSuccess={() => {
-            navigateTo('STAFF_PORTAL');
-          }}
           onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
           onNavigateHome={() => navigateTo('HOME')}
         />
@@ -704,13 +736,12 @@ export default function App() {
 
   // 7. Protected Staff Portal (Strict Role Enforced)
   if (route === 'STAFF_PORTAL') {
-    // Unauthenticated staff redirect
-    if (!currentUser) {
+    // Unauthenticated or inactive staff -> render StaffLogin with no leak
+    if (!currentUser || accountStatus !== 'OK' || currentUser.isActive !== true) {
       return (
         <>
           <StaffLogin
             settings={settings}
-            onSuccess={() => navigateTo('STAFF_PORTAL')}
             onNavigateMemberLogin={() => navigateTo('MEMBER_LOGIN')}
             onNavigateHome={() => navigateTo('HOME')}
           />
@@ -749,25 +780,33 @@ export default function App() {
       );
     }
 
+    // Explicit trainer context for supervisor view (never silently fall back to trainers[0])
+    const explicitTrainer = selectedTrainerIdForStaff
+      ? trainers.find(t => t.id === selectedTrainerIdForStaff) || null
+      : null;
+
     // Role-based staff view with desktop sidebar and mobile drawer
     return (
       <StaffLayout
         settings={settings}
         staffUser={currentUser}
-        activeView={staffSubView}
+        activeView={effectiveStaffSubView}
         setActiveView={(v) => {
+          // Gating: trainers cannot switch subviews
+          if (currentUser.role === 'trainer') return;
           // Gating: only owners can view ADMIN
-          if (v === 'ADMIN' && currentUser.role !== 'owner') {
-            alert('Restricted: Club Owner permissions required.');
-            return;
-          }
+          if (v === 'ADMIN' && currentUser.role !== 'owner') return;
           setStaffSubView(v);
         }}
         onLogout={handleLogout}
       >
-        {staffSubView === 'TRAINER' && (
+        {effectiveStaffSubView === 'TRAINER' && (
           <TrainerPortal
-            currentTrainer={currentUser.role === 'trainer' ? currentUser : trainers[0]}
+            currentTrainer={currentUser.role === 'trainer' ? currentUser : explicitTrainer}
+            isSupervisorView={currentUser.role !== 'trainer'}
+            trainers={trainers}
+            selectedTrainerId={currentUser.role === 'trainer' ? currentUser.id : selectedTrainerIdForStaff}
+            onSelectTrainerId={(id) => setSelectedTrainerIdForStaff(id)}
             zones={zones}
             activeSessions={activeSessions}
             members={members}
@@ -780,7 +819,7 @@ export default function App() {
           />
         )}
 
-        {staffSubView === 'RECEPTION' && (
+        {effectiveStaffSubView === 'RECEPTION' && (currentUser.role === 'admin' || currentUser.role === 'owner') && (
           <ReceptionDesk
             zones={zones}
             activeSessions={activeSessions}
@@ -789,7 +828,7 @@ export default function App() {
           />
         )}
 
-        {staffSubView === 'ADMIN' && (
+        {effectiveStaffSubView === 'ADMIN' && (
           currentUser.role === 'owner' ? (
             <AdminOwnerPortal
               settings={settings}
@@ -818,17 +857,46 @@ export default function App() {
 
   // 8. Protected Member Dashboard
   if (route === 'MEMBER_DASHBOARD') {
-    if (!currentUser) {
+    if (!currentUser || accountStatus !== 'OK' || currentUser.isActive !== true) {
       return (
         <>
           <MemberLogin
             settings={settings}
-            onSuccess={() => navigateTo('MEMBER_DASHBOARD')}
             onNavigateHome={() => navigateTo('HOME')}
             onNavigateStaffLogin={() => navigateTo('STAFF_LOGIN')}
           />
           <Analytics />
         </>
+      );
+    }
+
+    // Role check: staff accounts cannot view member dashboard -> redirect to staff portal
+    if (currentUser.role !== 'member') {
+      return (
+        <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 text-center">
+          <div className="max-w-md p-8 rounded-3xl bg-[#121214] border border-emerald-500/30">
+            <ShieldAlert className="w-10 h-10 text-emerald-400 mx-auto" />
+            <h2 className="text-xl font-bold text-white uppercase mt-4">Staff Operations Account</h2>
+            <p className="text-xs text-zinc-400 mt-2">
+              You are logged in with staff operations credentials. Staff members use the Staff Portal for club operations.
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button
+                onClick={() => navigateTo('STAFF_PORTAL')}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500 text-black font-bold text-xs uppercase"
+              >
+                Go to Staff Portal
+              </button>
+              <button
+                onClick={handleLogout}
+                className="px-5 py-2.5 rounded-xl bg-zinc-900 text-zinc-400 text-xs font-bold uppercase"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+          <Analytics />
+        </div>
       );
     }
 

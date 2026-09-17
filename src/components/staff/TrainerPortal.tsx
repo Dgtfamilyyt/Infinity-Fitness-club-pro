@@ -24,7 +24,11 @@ import { EditTrainerProfileModal } from './EditTrainerProfileModal';
 import { consultWorkoutSafetyAdvisor } from '../../services/aiAdvisor';
 
 interface TrainerPortalProps {
-  currentTrainer: UserProfile;
+  currentTrainer: UserProfile | null;
+  trainers?: UserProfile[];
+  selectedTrainerId?: string | null;
+  onSelectTrainerId?: (id: string | null) => void;
+  isSupervisorView?: boolean;
   zones: GymZone[];
   activeSessions: ActiveGymSession[];
   members: UserProfile[];
@@ -34,6 +38,10 @@ interface TrainerPortalProps {
 
 export const TrainerPortal: React.FC<TrainerPortalProps> = ({
   currentTrainer,
+  trainers,
+  selectedTrainerId,
+  onSelectTrainerId,
+  isSupervisorView = false,
   zones,
   activeSessions,
   members,
@@ -53,7 +61,7 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
 
   // Filter members assigned to this trainer or all
   const assignedMembers = members.filter(m => 
-    (!currentTrainer.id || m.assignedTrainerId === currentTrainer.id || m.assignedTrainerName === currentTrainer.fullName) &&
+    (!currentTrainer?.id || m.assignedTrainerId === currentTrainer.id || m.assignedTrainerName === currentTrainer.fullName) &&
     (m.fullName.toLowerCase().includes(searchFilter.toLowerCase()) || (m.memberId && m.memberId.toLowerCase().includes(searchFilter.toLowerCase())))
   );
 
@@ -87,45 +95,91 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
     <div className="space-y-6">
       {/* Top Banner */}
       <div className="rounded-2xl bg-[#121214] border border-zinc-800 p-6 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <button 
-            type="button"
-            onClick={() => setShowEditProfile(true)}
-            className="relative group rounded-xl overflow-hidden cursor-pointer"
-            title="Click to change trainer profile photo"
-          >
-            <img
-              src={currentTrainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
-              alt={currentTrainer.fullName}
-              referrerPolicy="no-referrer"
-              className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-500/40 group-hover:border-emerald-400 transition"
-            />
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-              <Camera className="w-5 h-5 text-white" />
-            </div>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-black text-white uppercase">{currentTrainer.fullName}</h2>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold">
-                TRAINER PORTAL
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400 mt-0.5">{currentTrainer.fitnessGoal || 'Head Strength & Conditioning Coach'}</p>
-            {currentTrainer.experience && (
-              <span className="text-[10px] text-zinc-500 font-mono block mt-0.5">{currentTrainer.experience}</span>
+        {currentTrainer ? (
+          <div className="flex items-center gap-3">
+            {!isSupervisorView ? (
+              <button 
+                type="button"
+                onClick={() => setShowEditProfile(true)}
+                className="relative group rounded-xl overflow-hidden cursor-pointer"
+                title="Click to change trainer profile photo"
+              >
+                <img
+                  src={currentTrainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
+                  alt={currentTrainer.fullName}
+                  referrerPolicy="no-referrer"
+                  className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-500/40 group-hover:border-emerald-400 transition"
+                />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                  <Camera className="w-5 h-5 text-white" />
+                </div>
+              </button>
+            ) : (
+              <img
+                src={currentTrainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
+                alt={currentTrainer.fullName}
+                referrerPolicy="no-referrer"
+                className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-500/40"
+              />
             )}
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black text-white uppercase">{currentTrainer.fullName}</h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold">
+                  {isSupervisorView ? 'COACH VIEW' : 'TRAINER PORTAL'}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">{currentTrainer.fitnessGoal || 'Strength & Conditioning Coach'}</p>
+              {currentTrainer.experience && (
+                <span className="text-[10px] text-zinc-500 font-mono block mt-0.5">{currentTrainer.experience}</span>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="w-14 h-14 rounded-xl bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Dumbbell className="w-7 h-7" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black text-white uppercase">Floor Coaching Overview</h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-emerald-400 font-mono font-bold border border-zinc-700">
+                  SUPERVISOR VIEW
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">Floor management view • All floor coaches and athletes</p>
+            </div>
+          </div>
+        )}
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowEditProfile(true)}
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-emerald-500/50 text-white font-bold text-xs uppercase tracking-wider transition"
-          >
-            <Edit3 className="w-4 h-4 text-emerald-400" />
-            <span>Edit Profile</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {isSupervisorView && trainers && onSelectTrainerId && (
+            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Coach:</span>
+              <select
+                value={selectedTrainerId || ''}
+                onChange={(e) => onSelectTrainerId(e.target.value || null)}
+                className="bg-transparent text-xs text-white font-semibold focus:outline-none cursor-pointer"
+              >
+                <option value="" className="bg-[#121214] text-white">General Overview (All Floor)</option>
+                {trainers.map((t) => (
+                  <option key={t.id} value={t.id} className="bg-[#121214] text-white">
+                    {t.fullName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {currentTrainer && !isSupervisorView && (
+            <button
+              onClick={() => setShowEditProfile(true)}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-emerald-500/50 text-white font-bold text-xs uppercase tracking-wider transition"
+            >
+              <Edit3 className="w-4 h-4 text-emerald-400" />
+              <span>Edit Profile</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowScanner(true)}
@@ -316,7 +370,7 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
       <QRScannerModal
         isOpen={showScanner}
         onClose={() => setShowScanner(false)}
-        staffName={currentTrainer.fullName}
+        staffName={currentTrainer?.fullName || 'Floor Coach'}
       />
 
       {/* Trainer Override Modal */}
@@ -328,20 +382,22 @@ export const TrainerPortal: React.FC<TrainerPortalProps> = ({
           zones={zones}
           isOpen={true}
           onClose={() => setSelectedMemberForOverride(null)}
-          trainerName={currentTrainer.fullName}
+          trainerName={currentTrainer?.fullName || 'Floor Coach'}
         />
       )}
 
       {/* Edit Trainer Profile Modal */}
-      <EditTrainerProfileModal
-        trainer={currentTrainer}
-        isOpen={showEditProfile}
-        onClose={() => setShowEditProfile(false)}
-        onSave={(updated) => {
-          dataService.updateTrainer(updated);
-          onUpdateTrainer?.(updated);
-        }}
-      />
+      {currentTrainer && (
+        <EditTrainerProfileModal
+          trainer={currentTrainer}
+          isOpen={showEditProfile}
+          onClose={() => setShowEditProfile(false)}
+          onSave={(updated) => {
+            dataService.updateTrainer(updated);
+            onUpdateTrainer?.(updated);
+          }}
+        />
+      )}
     </div>
   );
 };
