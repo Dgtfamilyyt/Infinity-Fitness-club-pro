@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { getStorage } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions';
 import { UserProfile, UserRole } from '../types';
 import { 
   normalizeEmail, 
@@ -72,6 +73,9 @@ export const db = getFirestore(app);
 
 // Initialize Firebase Storage
 export const storage = getStorage(app);
+
+// Initialize Firebase Functions
+export const functions = getFunctions(app);
 
 // Safe optional Firebase Analytics (browser-only, never breaks execution)
 export let analytics: any = null;

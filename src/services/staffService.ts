@@ -4,8 +4,6 @@ import {
   getDocs, 
   getDoc,
   setDoc, 
-  updateDoc, 
-  deleteDoc,
   onSnapshot, 
   query, 
   where, 
@@ -15,9 +13,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { INITIAL_TRAINERS, INITIAL_STAFF } from './seedData';
 import { isDevDemoEnabled } from './devMode';
-import { auditService } from './auditService';
-import { DEFAULT_GYM_ID } from './gymSettingsService';
-import { normalizeEmail, hashEmail, PRE_REGISTRATION_LINKS_COLLECTION } from './preRegistrationService';
+import { functionsService } from './functionsService';
 import { trainerService } from './trainerService';
 
 const PROFILES_COLLECTION = 'profiles';
@@ -70,6 +66,8 @@ export const staffService = {
 
   /**
    * Create a new staff account (trainer, admin, or owner)
+   * PRIVILEGED OPERATION: Executed authoritatively via Firebase Functions backend.
+   * Derives caller identity, enforces role boundaries, creates Auth user & canonical profile.
    */
   async createStaffMember(
     data: {
@@ -79,164 +77,90 @@ export const staffService = {
       role: 'trainer' | 'admin' | 'owner';
       fitnessGoal?: string;
       experience?: string;
+      bio?: string;
       trainerNotes?: string;
       avatarUrl?: string;
     },
-    creatorName: string
+    _creatorName?: string
   ): Promise<UserProfile> {
-    const cleanEmail = normalizeEmail(data.email);
-    if (!cleanEmail) {
-      throw new Error('Valid email address is required.');
-    }
-
-    const emailHash = await hashEmail(cleanEmail);
-    const linkRef = doc(db, PRE_REGISTRATION_LINKS_COLLECTION, emailHash);
-
-    // Check if this email is already pre-registered
-    const existingLink = await getDoc(linkRef);
-    if (existingLink.exists()) {
-      throw new Error('This email is already pre-registered.');
-    }
-
-    const rawId = `staff_${data.role}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-    const newStaffProfile: UserProfile = {
-      id: rawId,
-      uid: rawId,
-      fullName: data.fullName.trim(),
-      email: cleanEmail,
-      phone: data.phone?.trim() || '',
+    const result = await functionsService.createStaffAccount({
+      fullName: data.fullName,
+      email: data.email,
+      phone: data.phone,
       role: data.role,
-      isActive: true,
-      avatarUrl: data.avatarUrl || (
-        data.role === 'trainer'
-          ? 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'
-          : 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80'
-      ),
-      fitnessGoal: data.fitnessGoal || (
-        data.role === 'trainer'
-          ? 'Floor Strength & Conditioning Specialist'
-          : data.role === 'admin'
-          ? 'Reception & Front Desk Lead'
-          : 'Club Management'
-      ),
-      experience: data.experience || (data.role === 'trainer' ? 'Certified Coach' : undefined),
-      trainerNotes: data.trainerNotes || '',
-      createdAt: new Date().toISOString()
-    };
+      fitnessGoal: data.fitnessGoal,
+      experience: data.experience,
+      bio: data.bio,
+      trainerNotes: data.trainerNotes,
+      avatarUrl: data.avatarUrl
+    });
 
-    try {
-      // 1. Save profile document
-      await setDoc(doc(db, PROFILES_COLLECTION, rawId), {
-        ...newStaffProfile,
-        gymId: DEFAULT_GYM_ID,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-
-      // 2. Save pre-registration link record
-      await setDoc(linkRef, {
-        emailHash,
-        emailNormalized: cleanEmail,
-        profileDocId: rawId,
-        gymId: DEFAULT_GYM_ID,
-        role: data.role,
-        authUid: null,
-        authLinked: false,
-        isActive: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-
-      // 3. If trainer, sync safe display fields into public_trainers
-      if (data.role === 'trainer') {
-        await trainerService.syncPublicTrainer(newStaffProfile, true);
-      }
-
-      // 4. Audit log
-      await auditService.logAuditEvent(
-        creatorName,
-        'STAFF_CREATED',
-        'UserProfile',
-        rawId,
-        `Created ${data.role.toUpperCase()} account for ${newStaffProfile.fullName} (${cleanEmail})`
-      );
-
-      return newStaffProfile;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `${PROFILES_COLLECTION}/${rawId}`);
+    if (!result.success || !result.profile) {
+      throw new Error('Staff account creation failed on server.');
     }
+
+    return result.profile;
   },
 
   /**
    * Update active/suspended status of a staff member
+   * PRIVILEGED OPERATION: Executed authoritatively via Firebase Functions backend.
+   * Admins may manage trainers; Owners may manage all staff.
    */
-  async updateStaffStatus(uid: string, isActive: boolean, actorName: string): Promise<void> {
-    const path = `${PROFILES_COLLECTION}/${uid}`;
-    try {
-      const ref = doc(db, PROFILES_COLLECTION, uid);
-      await updateDoc(ref, {
-        isActive,
-        updatedAt: serverTimestamp()
-      });
+  async updateStaffStatus(uid: string, isActive: boolean, _actorName?: string): Promise<void> {
+    const result = await functionsService.setStaffActiveStatus({
+      targetUid: uid,
+      isActive
+    });
 
-      // Update public_trainers visibility if this staff member has a public card
-      await trainerService.setPublicTrainerVisibility(uid, isActive);
-
-      await auditService.logAuditEvent(
-        actorName,
-        isActive ? 'STAFF_ACTIVATED' : 'STAFF_SUSPENDED',
-        'UserProfile',
-        uid,
-        `${isActive ? 'Activated' : 'Suspended'} staff account (UID: ${uid})`
-      );
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+    if (!result.success) {
+      throw new Error('Failed to update staff active status.');
     }
   },
 
   /**
-   * Update role of a staff member (Owner only)
+   * Update role of a staff member
+   * PRIVILEGED OPERATION: Executed authoritatively via Firebase Functions backend (Owner only).
    */
-  async updateStaffRole(uid: string, newRole: UserRole, actorName: string): Promise<void> {
-    const path = `${PROFILES_COLLECTION}/${uid}`;
-    try {
-      const ref = doc(db, PROFILES_COLLECTION, uid);
-      await updateDoc(ref, {
-        role: newRole,
-        updatedAt: serverTimestamp()
-      });
+  async updateStaffRole(uid: string, newRole: UserRole, _actorName?: string): Promise<void> {
+    if (newRole === 'member') {
+      throw new Error('Demoting staff to member directly is not supported.');
+    }
 
-      // If demoted from trainer, hide public card
-      if (newRole !== 'trainer') {
-        await trainerService.setPublicTrainerVisibility(uid, false);
-      }
+    const result = await functionsService.setStaffRole({
+      targetUid: uid,
+      newRole: newRole as 'trainer' | 'admin' | 'owner'
+    });
 
-      await auditService.logAuditEvent(
-        actorName,
-        'STAFF_ROLE_CHANGED',
-        'UserProfile',
-        uid,
-        `Changed role of staff account (UID: ${uid}) to ${newRole.toUpperCase()}`
-      );
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+    if (!result.success) {
+      throw new Error('Failed to update staff role.');
     }
   },
 
   /**
-   * Update staff details (bio, specialty, phone)
+   * Update staff non-privileged profile details (bio, specialty, phone)
+   * Enforces that privileged fields (role, isActive, authUid, authLinked, gymId) are never modified directly.
    */
-  async updateStaffProfile(uid: string, updates: Partial<UserProfile>, actorName: string): Promise<void> {
+  async updateStaffProfile(uid: string, updates: Partial<UserProfile>, _actorName?: string): Promise<void> {
+    // Strip any privileged fields from client update
+    const safeUpdates: Partial<UserProfile> = { ...updates };
+    delete safeUpdates.role;
+    delete safeUpdates.isActive;
+    delete safeUpdates.authUid;
+    delete safeUpdates.authLinked;
+    delete safeUpdates.gymId;
+    delete safeUpdates.id;
+    delete safeUpdates.uid;
+
     const path = `${PROFILES_COLLECTION}/${uid}`;
     try {
       const ref = doc(db, PROFILES_COLLECTION, uid);
       await setDoc(ref, {
-        ...updates,
+        ...safeUpdates,
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      // If updated fields affect public trainer card, sync safe fields
+      // If updated fields affect trainer public profile, sync safe display fields
       const snap = await getDoc(ref);
       if (snap.exists()) {
         const fullProfile = { ...snap.data(), id: uid } as UserProfile;
@@ -244,38 +168,22 @@ export const staffService = {
           await trainerService.syncPublicTrainer(fullProfile);
         }
       }
-
-      await auditService.logAuditEvent(
-        actorName,
-        'STAFF_PROFILE_UPDATED',
-        'UserProfile',
-        uid,
-        `Updated profile details for staff account ${uid}`
-      );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
   },
 
   /**
-   * Remove a staff account
+   * Remove / safely deactivate a staff account
+   * PRIVILEGED OPERATION: Executed authoritatively via Firebase Functions backend (Owner only).
    */
-  async deleteStaffMember(uid: string, actorName: string): Promise<void> {
-    const path = `${PROFILES_COLLECTION}/${uid}`;
-    try {
-      await deleteDoc(doc(db, PROFILES_COLLECTION, uid));
-      // Also remove any public trainer card
-      await trainerService.deletePublicTrainer(uid);
+  async deleteStaffMember(uid: string, _actorName?: string): Promise<void> {
+    const result = await functionsService.deleteStaffMember({
+      targetUid: uid
+    });
 
-      await auditService.logAuditEvent(
-        actorName,
-        'STAFF_DELETED',
-        'UserProfile',
-        uid,
-        `Removed staff account record ${uid}`
-      );
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+    if (!result.success) {
+      throw new Error('Failed to delete staff member on server.');
     }
   }
 };

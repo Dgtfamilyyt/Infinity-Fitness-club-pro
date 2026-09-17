@@ -43,6 +43,8 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
   const [payAmount, setPayAmount] = useState<number>(8999);
   const [payMethod, setPayMethod] = useState<PaymentRecord['paymentMethod']>('UPI');
   const [payRef, setPayRef] = useState('');
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   // Pre-register Member State
   const [showPreRegisterModal, setShowPreRegisterModal] = useState(false);
@@ -82,20 +84,28 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
     }
   };
 
-  const handleRecordPayment = (e: React.FormEvent) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    dataService.recordPayment({
-      memberId: selectedPayMember.id,
-      memberName: selectedPayMember.fullName,
-      planName: selectedPayMember.planName || 'Quarterly Transformation',
-      amount: Number(payAmount),
-      paymentMethod: payMethod,
-      reference: payRef.trim() || `TXN-${Date.now()}`,
-      recordedBy: 'Receptionist'
-    });
+    setIsRecordingPayment(true);
+    setPaymentError(null);
+    try {
+      await dataService.recordPayment({
+        memberId: selectedPayMember.id,
+        memberName: selectedPayMember.fullName,
+        planName: selectedPayMember.planName || 'Quarterly Transformation',
+        amount: Number(payAmount),
+        paymentMethod: payMethod,
+        reference: payRef.trim() || `TXN-${Date.now()}`,
+        recordedBy: 'Receptionist'
+      });
 
-    setShowPaymentModal(false);
-    setPayRef('');
+      setShowPaymentModal(false);
+      setPayRef('');
+    } catch (err: any) {
+      setPaymentError(err?.message || 'Payment recording failed. Please retry.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
   };
 
   return (
@@ -312,19 +322,30 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
                 />
               </div>
 
+              {paymentError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">
+                  {paymentError}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
-                  className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                  onClick={() => {
+                    setShowPaymentModal(false);
+                    setPaymentError(null);
+                  }}
+                  disabled={isRecordingPayment}
+                  className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold"
+                  disabled={isRecordingPayment}
+                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold disabled:opacity-50"
                 >
-                  Save Payment & Renew
+                  {isRecordingPayment ? 'Recording...' : 'Save Payment & Renew'}
                 </button>
               </div>
             </form>

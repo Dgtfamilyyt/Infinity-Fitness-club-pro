@@ -115,8 +115,6 @@ service cloud.firestore {
                   || isStaff();
 
       allow create: if signedIn() && (
-        isAdminOrOwner() || 
-        isStaff() || 
         // Initial emergency bootstrap: allows emergency owner to provision initial owner profile only when gym is unseeded
         (
           isBootstrap() &&
@@ -128,6 +126,14 @@ service cloud.firestore {
           request.resource.data.authLinked == true &&
           request.auth.token.email != null &&
           request.resource.data.email == request.auth.token.email
+        ) ||
+        // Staff creating member profile at reception desk (strictly role == 'member' only)
+        // PRIVILEGED STAFF CREATION IS FORBIDDEN FROM CLIENT (handled via Cloud Functions)
+        (
+          isStaff() &&
+          request.resource.data.role == 'member' &&
+          request.resource.data.gymId == 'infinity-neelambur' &&
+          request.resource.data.isActive == true
         ) ||
         // Strict temporary safe client-side member profile creation (Requirements 1, 2, 3)
         (
@@ -143,15 +149,29 @@ service cloud.firestore {
       );
 
       allow update: if signedIn() && (
-        isAdminOrOwner() ||
-        // Normal self-update for own profile: cannot modify privileged, structural, or link fields (Requirement 4)
-        (myUid() == userId && (
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        // Staff or Admin updating non-privileged fields
+        // PRIVILEGED FIELDS (role, isActive) CANNOT BE MODIFIED FROM CLIENT (handled via Cloud Functions)
+        // Admin cannot touch an owner's document
+        (
+          isAdminOrOwner() &&
+          (!isAdmin() || resource.data.role != 'owner') &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.isActive == resource.data.isActive &&
+          request.resource.data.gymId == resource.data.gymId &&
+          (!('authUid' in resource.data) || request.resource.data.authUid == resource.data.authUid) &&
+          (!('authLinked' in resource.data) || request.resource.data.authLinked == resource.data.authLinked)
+        ) ||
+        // Normal self-update for own profile: cannot modify privileged, structural, or link fields
+        (
+          myUid() == userId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.isActive == resource.data.isActive &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny([
             'role', 'status', 'isActive', 'memberId', 'qrToken', 
             'membershipPlanId', 'planName', 'membershipStart', 'membershipExpiry', 
             'assignedTrainerId', 'gymId', 'authUid', 'authLinked'
-          ])
-        )) ||
+          ]))
+        ) ||
         // Controlled initial linking of member pre-registration document (Requirements 4, 7)
         (
           resource.data.role == 'member' &&
@@ -164,7 +184,8 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isAdminOrOwner();
+      // Only Owner can delete a profile, and no one can delete an owner profile from client
+      allow delete: if isOwner() && resource.data.role != 'owner';
     }
 
     // ==========================================
@@ -250,15 +271,16 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 11. FINANCIAL PAYMENTS (Immutable)
+    // 11. FINANCIAL PAYMENTS (Server-Authoritative Only)
     // ==========================================
     match /payments/{paymentId} {
       allow read: if signedIn() && (
         isAdminOrOwner() || 
         resource.data.memberId == myUid()
       );
-      allow create: if isAdminOrOwner();
-      allow update, delete: if false;
+      // Client writes are completely forbidden. All payments must be processed
+      // through the privileged recordPayment Firebase Function.
+      allow write: if false;
     }
 
     // ==========================================
@@ -286,12 +308,12 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 14. AUDIT LOGS (Append-Only)
+    // 14. AUDIT LOGS (Server-Authoritative Only)
     // ==========================================
     match /audit_logs/{logId} {
       allow read: if isAdminOrOwner();
-      allow create: if isStaff();
-      allow update, delete: if false;
+      // Privileged audit logs are emitted exclusively by server-side Firebase Functions
+      allow write: if false;
     }
 
     // ==========================================

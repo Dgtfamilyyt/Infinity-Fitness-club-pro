@@ -1,20 +1,17 @@
 import { 
   collection, 
-  doc, 
   getDocs, 
-  setDoc, 
   onSnapshot, 
   query, 
   where, 
-  orderBy, 
-  serverTimestamp 
+  orderBy
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { PaymentRecord } from '../types';
 import { INITIAL_PAYMENTS } from './seedData';
 import { isDevDemoEnabled } from './devMode';
-import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
+import { functionsService } from './functionsService';
 
 const PAYMENTS_COLLECTION = 'payments';
 
@@ -77,52 +74,35 @@ export const paymentService = {
     );
   },
 
+  /**
+   * Record a financial payment
+   * PRIVILEGED OPERATION: Dispatched authoritatively to Firebase Functions backend.
+   * Actor identity and timestamp are derived server-side.
+   */
   async recordPayment(payment: {
     memberId: string;
-    memberName: string;
-    planName: string;
+    memberName?: string;
+    planName?: string;
     amount: number;
-    paymentMethod: PaymentRecord['paymentMethod'];
-    reference: string;
-    recordedBy: string;
+    paymentMethod: PaymentRecord['paymentMethod'] | string;
+    reference?: string;
+    recordedBy?: string;
+    planId?: string;
     notes?: string;
   }): Promise<PaymentRecord> {
-    const id = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const dateStr = new Date().toISOString().split('T')[0];
-    const path = `${PAYMENTS_COLLECTION}/${id}`;
-
-    const newRecord: PaymentRecord = {
-      id,
-      memberId: payment.memberId,
-      memberName: payment.memberName,
-      planName: payment.planName,
+    const res = await functionsService.recordPayment({
+      memberUid: payment.memberId,
       amount: Number(payment.amount),
       paymentMethod: payment.paymentMethod,
       reference: payment.reference,
-      date: dateStr,
-      recordedBy: payment.recordedBy,
-      notes: payment.notes || ''
-    };
+      planId: payment.planId,
+      notes: payment.notes
+    });
 
-    try {
-      const ref = doc(db, PAYMENTS_COLLECTION, id);
-      await setDoc(ref, {
-        ...newRecord,
-        gymId: DEFAULT_GYM_ID,
-        createdAt: serverTimestamp()
-      });
-
-      await auditService.logAuditEvent(
-        payment.recordedBy,
-        'PAYMENT_RECORDED',
-        'Payment',
-        id,
-        `Recorded ${payment.amount} INR via ${payment.paymentMethod} from ${payment.memberName} (${payment.reference})`
-      );
-
-      return newRecord;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+    if (!res.success || !res.payment) {
+      throw new Error('Payment recording failed on backend.');
     }
+
+    return res.payment;
   }
 };

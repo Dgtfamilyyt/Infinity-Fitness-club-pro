@@ -601,30 +601,22 @@ class DataService {
     this.notify();
   }
 
-  recordPayment(paymentData: Omit<PaymentRecord, 'id' | 'date'> & { date?: string }): PaymentRecord {
-    const newPayment: PaymentRecord = {
-      id: `pay-${Date.now()}`,
-      ...paymentData,
-      date: paymentData.date || new Date().toISOString().split('T')[0]
-    };
+  async recordPayment(paymentData: Omit<PaymentRecord, 'id' | 'date'> & { date?: string }): Promise<PaymentRecord> {
+    // Await authoritative backend confirmation from Firebase Functions
+    const confirmedPayment = await paymentService.recordPayment({
+      memberId: paymentData.memberId,
+      memberName: paymentData.memberName,
+      planName: paymentData.planName,
+      amount: paymentData.amount,
+      paymentMethod: paymentData.paymentMethod,
+      reference: paymentData.reference,
+      recordedBy: paymentData.recordedBy,
+      notes: paymentData.notes
+    });
 
-    this.payments = [newPayment, ...this.payments];
-
-    // Write to Firestore
-    paymentService.recordPayment({
-      memberId: newPayment.memberId,
-      memberName: newPayment.memberName,
-      planName: newPayment.planName,
-      amount: newPayment.amount,
-      paymentMethod: newPayment.paymentMethod,
-      reference: newPayment.reference,
-      recordedBy: newPayment.recordedBy,
-      notes: newPayment.notes
-    }).catch(e => console.warn('Firestore payment record error:', e));
-
-    this.addAudit(newPayment.recordedBy, 'RECORD_PAYMENT', 'PaymentRecord', newPayment.id, `Recorded ₹${newPayment.amount} via ${newPayment.paymentMethod} from ${newPayment.memberName}`);
+    this.payments = [confirmedPayment, ...this.payments.filter(p => p.id !== confirmedPayment.id)];
     this.notify();
-    return newPayment;
+    return confirmedPayment;
   }
 
   toggleExerciseCompleted(exerciseId: string): void {
