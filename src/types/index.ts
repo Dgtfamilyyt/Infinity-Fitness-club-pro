@@ -34,10 +34,30 @@ export interface UserProfile {
   weight?: number; // kg
   restrictions?: string;
   trainerNotes?: string;
+  bio?: string;
+  displayOrder?: number;
   attendanceStreak?: number;
   workoutStreak?: number;
   preRegistrationDocId?: string;
   createdAt?: string;
+}
+
+/**
+ * Public Coach/Trainer Card Schema (public_trainers/{trainerId})
+ * Strictly contains only safe public-facing display fields.
+ * MUST NOT contain: email, phone, authUid, uid, role permissions,
+ * trainerNotes, payment data, audit data, membership data, QR tokens, restrictions, or internal notes.
+ */
+export interface PublicTrainer {
+  id: string;
+  displayName: string;
+  avatarUrl?: string;
+  specialty?: string;
+  experience?: string;
+  bio?: string;
+  displayOrder?: number;
+  isPublic: boolean;
+  gymId: 'infinity-neelambur' | string;
 }
 
 export interface PreRegistrationLink {

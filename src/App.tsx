@@ -77,6 +77,7 @@ export default function App() {
   const plans = dataService.getPlans();
   const members = dataService.getMembers();
   const trainers = dataService.getTrainers();
+  const publicTrainers = dataService.getPublicTrainers();
   const activeSessions = dataService.getActiveSessions();
   const workout = dataService.getWorkoutAssignment();
   const payments = dataService.getPayments();
@@ -170,6 +171,23 @@ export default function App() {
         // Members cannot access staff portal -> show access denied
         setAccountStatus('DENIED');
         setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance.');
+      }
+    } else if (route === 'STAFF_LOGIN') {
+      if (currentUser && currentUser.isActive === true) {
+        if (currentUser.role === 'member') {
+          setAccountStatus('DENIED');
+          setDenialMessage('Access Denied: Athletes and gym members do not have staff operations clearance.');
+        } else {
+          navigateTo('STAFF_PORTAL');
+        }
+      }
+    } else if (route === 'MEMBER_LOGIN') {
+      if (currentUser && currentUser.isActive === true) {
+        if (currentUser.role === 'member') {
+          navigateTo('MEMBER_DASHBOARD');
+        } else {
+          navigateTo('STAFF_PORTAL');
+        }
       }
     }
   }, [route, currentUser, accountStatus, authLoading, navigateTo]);
@@ -708,6 +726,9 @@ export default function App() {
 
   // 5. Dedicated Member Login Page
   if (route === 'MEMBER_LOGIN') {
+    if (currentUser && currentUser.isActive === true) {
+      return null;
+    }
     return (
       <>
         <MemberLogin
@@ -722,6 +743,42 @@ export default function App() {
 
   // 6. Dedicated Staff Login Page
   if (route === 'STAFF_LOGIN') {
+    // Deterministic: NEVER display StaffLogin to an already authenticated member
+    if (currentUser && currentUser.isActive === true) {
+      if (currentUser.role === 'member') {
+        return (
+          <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-[#121214] border border-red-500/30 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center mx-auto">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <h2 className="mt-5 text-xl font-black uppercase text-red-400 tracking-tight">
+                ACCESS DENIED
+              </h2>
+              <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
+                Access Denied: Athletes and gym members do not have staff operations clearance.
+              </p>
+              <div className="mt-6 pt-6 border-t border-zinc-800 flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => navigateTo('MEMBER_DASHBOARD')}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-extrabold uppercase tracking-wider transition"
+                >
+                  Go to Member Portal
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 text-xs font-bold uppercase tracking-wider transition"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+            <Analytics />
+          </div>
+        );
+      }
+      return null;
+    }
     return (
       <>
         <StaffLogin
@@ -938,7 +995,7 @@ export default function App() {
         <PublicLanding
           settings={settings}
           plans={plans}
-          trainers={trainers}
+          trainers={publicTrainers}
           onJoinClick={() => navigateTo('MEMBER_LOGIN')}
           onLoginClick={() => navigateTo('MEMBER_LOGIN')}
           onStaffLoginClick={() => navigateTo('STAFF_LOGIN')}

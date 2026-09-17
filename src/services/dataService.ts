@@ -1,5 +1,6 @@
 import { 
   UserProfile, 
+  PublicTrainer,
   UserRole,
   GymZone, 
   MembershipPlan, 
@@ -16,6 +17,7 @@ import {
   INITIAL_ZONES,
   INITIAL_PLANS,
   INITIAL_TRAINERS,
+  INITIAL_PUBLIC_TRAINERS,
   INITIAL_STAFF,
   INITIAL_MEMBERS,
   INITIAL_ACTIVE_SESSIONS,
@@ -49,6 +51,7 @@ class DataService {
   private plans: MembershipPlan[] = INITIAL_PLANS;
   private members: UserProfile[] = isDevDemoEnabled() ? INITIAL_MEMBERS : [];
   private trainers: UserProfile[] = isDevDemoEnabled() ? INITIAL_TRAINERS : [];
+  private publicTrainers: PublicTrainer[] = isDevDemoEnabled() ? INITIAL_PUBLIC_TRAINERS : [];
   private staff: UserProfile[] = isDevDemoEnabled() ? INITIAL_STAFF : [];
   private activeSessions: ActiveGymSession[] = isDevDemoEnabled() ? INITIAL_ACTIVE_SESSIONS : [];
   private arunWorkout: WorkoutAssignment = INITIAL_TODAY_WORKOUT_ARUN;
@@ -103,10 +106,10 @@ class DataService {
         })
       );
 
-      // 4. Floor Coaches Directory (Publicly accessible in Firestore)
+      // 4. Floor Coaches Directory (Publicly accessible in Firestore via public_trainers)
       this.unsubs.push(
-        staffService.subscribeTrainers((trainers) => {
-          this.trainers = trainers;
+        trainerService.subscribePublicTrainers((publicTrainers) => {
+          this.publicTrainers = publicTrainers;
           this.notify();
         })
       );
@@ -216,6 +219,7 @@ class DataService {
   getPlans(): MembershipPlan[] { return this.plans; }
   getMembers(): UserProfile[] { return this.members; }
   getTrainers(): UserProfile[] { return this.trainers; }
+  getPublicTrainers(): PublicTrainer[] { return this.publicTrainers; }
   getStaff(): UserProfile[] { return this.staff; }
   getAllProfiles(): UserProfile[] { return [...this.members, ...this.trainers, ...this.staff]; }
 
@@ -254,6 +258,18 @@ class DataService {
       this.trainers[idx] = { ...this.trainers[idx], ...trainer };
     } else {
       this.trainers.push(trainer);
+    }
+    const publicIdx = this.publicTrainers.findIndex(pt => pt.id === trainer.id);
+    if (publicIdx >= 0) {
+      this.publicTrainers[publicIdx] = {
+        ...this.publicTrainers[publicIdx],
+        displayName: trainer.fullName,
+        avatarUrl: trainer.avatarUrl || this.publicTrainers[publicIdx].avatarUrl,
+        specialty: trainer.fitnessGoal || this.publicTrainers[publicIdx].specialty,
+        experience: trainer.experience || this.publicTrainers[publicIdx].experience,
+        bio: trainer.bio || this.publicTrainers[publicIdx].bio,
+        isPublic: trainer.isActive !== false
+      };
     }
     trainerService.updateTrainer(trainer).catch(e => console.warn('Could not persist trainer:', e));
     this.addAudit(trainer.fullName, 'TRAINER_PROFILE_UPDATED', 'UserProfile', trainer.id, `Profile details & photo updated for ${trainer.fullName}`);

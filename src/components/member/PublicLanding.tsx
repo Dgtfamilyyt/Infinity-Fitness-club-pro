@@ -16,13 +16,13 @@ import {
   ChevronDown,
   MessageCircle
 } from 'lucide-react';
-import { GymSettings, MembershipPlan, UserProfile } from '../../types';
+import { GymSettings, MembershipPlan, PublicTrainer } from '../../types';
 import { GoogleMapsLocation } from '../common/GoogleMapsLocation';
 
 interface PublicLandingProps {
   settings: GymSettings;
   plans: MembershipPlan[];
-  trainers: UserProfile[];
+  trainers: PublicTrainer[];
   onJoinClick: (plan?: MembershipPlan) => void;
   onLoginClick: () => void;
   onStaffLoginClick?: () => void;
@@ -291,19 +291,35 @@ export const PublicLanding: React.FC<PublicLandingProps> = ({
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
-          {trainers.map((trainer) => (
-            <div key={trainer.id} className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-6 flex flex-col items-center text-center">
-              <img
-                src={trainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
-                alt={trainer.fullName}
-                referrerPolicy="no-referrer"
-                className="w-24 h-24 rounded-full object-cover border-2 border-emerald-500/40 p-1 mb-4 shadow-lg"
-              />
-              <h3 className="text-lg font-bold text-white">{trainer.fullName}</h3>
-              <div className="text-xs text-emerald-400 font-semibold mt-1">{trainer.fitnessGoal}</div>
-              <p className="text-xs text-zinc-400 mt-3 leading-relaxed">{trainer.trainerNotes}</p>
+          {trainers.length === 0 ? (
+            <div className="col-span-full py-12 text-center rounded-2xl bg-zinc-900/40 border border-zinc-800/80 p-8">
+              <Award className="w-10 h-10 text-emerald-500/50 mx-auto mb-3" />
+              <h4 className="text-base font-bold text-white uppercase tracking-tight">Trainer Information</h4>
+              <p className="mt-1 text-sm text-zinc-400">Trainer information will be available soon.</p>
+              <p className="mt-0.5 text-xs text-zinc-500 font-mono">Our certified floor coaching roster is currently being synchronized.</p>
             </div>
-          ))}
+          ) : (
+            trainers.map((trainer) => (
+              <div key={trainer.id} className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-6 flex flex-col items-center text-center">
+                <img
+                  src={trainer.avatarUrl || 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80'}
+                  alt={trainer.displayName}
+                  referrerPolicy="no-referrer"
+                  className="w-24 h-24 rounded-full object-cover border-2 border-emerald-500/40 p-1 mb-4 shadow-lg"
+                />
+                <h3 className="text-lg font-bold text-white">{trainer.displayName}</h3>
+                {trainer.specialty && (
+                  <div className="text-xs text-emerald-400 font-semibold mt-1">{trainer.specialty}</div>
+                )}
+                {trainer.experience && (
+                  <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{trainer.experience}</div>
+                )}
+                {trainer.bio && (
+                  <p className="text-xs text-zinc-400 mt-3 leading-relaxed">{trainer.bio}</p>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </section>
 

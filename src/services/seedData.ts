@@ -1,5 +1,6 @@
 import { 
   UserProfile, 
+  PublicTrainer,
   GymZone, 
   MembershipPlan, 
   WorkoutAssignment, 
@@ -226,6 +227,42 @@ export const INITIAL_TRAINERS: UserProfile[] = [
     experience: 'Athlete',
     fitnessGoal: 'Powerlifting & Athletic Performance Coach',
     trainerNotes: 'National powerlifter, focus on deadlift/squat technique and CNS recovery.'
+  }
+];
+
+export const INITIAL_PUBLIC_TRAINERS: PublicTrainer[] = [
+  {
+    id: 'trainer-rahul',
+    displayName: 'Rahul Sharma',
+    avatarUrl: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80',
+    specialty: 'Head Strength & Physique Coach',
+    experience: 'Master Coach & Physique Athlete',
+    bio: 'Specializes in hypertrophy, biomechanics, functional strength periodization, and injury prevention.',
+    displayOrder: 1,
+    isPublic: true,
+    gymId: 'infinity-neelambur'
+  },
+  {
+    id: 'trainer-priya',
+    displayName: 'Priya Verma',
+    avatarUrl: 'https://images.unsplash.com/photo-1594381898411-846e7d193883?w=600&auto=format&fit=crop&q=80',
+    specialty: 'Functional Mobility & Fat Loss Specialist',
+    experience: 'Certified Mobility & Conditioning Coach',
+    bio: 'Expert in corrective exercise, postural rehabilitation, and high-intensity athletic conditioning.',
+    displayOrder: 2,
+    isPublic: true,
+    gymId: 'infinity-neelambur'
+  },
+  {
+    id: 'trainer-vikram',
+    displayName: 'Vikram Singh',
+    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
+    specialty: 'Powerlifting & Athletic Performance Coach',
+    experience: 'National Powerlifter & Strength Specialist',
+    bio: 'Focuses on powerlifting discipline, maximal biomechanical efficiency, and nervous system recovery.',
+    displayOrder: 3,
+    isPublic: true,
+    gymId: 'infinity-neelambur'
   }
 ];
 

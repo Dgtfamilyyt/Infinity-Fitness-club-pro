@@ -190,6 +190,23 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["emailHash", "emailNormalized", "profileDocId", "gymId", "role"]
+    },
+    "public_trainers": {
+      "title": "Public Trainers",
+      "description": "Public-facing coach cards with sensitive fields stripped",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "specialty": { "type": "string" },
+        "experience": { "type": "string" },
+        "bio": { "type": "string" },
+        "displayOrder": { "type": "number" },
+        "isPublic": { "type": "boolean" },
+        "gymId": { "type": "string" }
+      },
+      "required": ["displayName", "isPublic"]
     }
   }
 }

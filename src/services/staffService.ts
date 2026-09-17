@@ -18,6 +18,7 @@ import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 import { normalizeEmail, hashEmail, PRE_REGISTRATION_LINKS_COLLECTION } from './preRegistrationService';
+import { trainerService } from './trainerService';
 
 const PROFILES_COLLECTION = 'profiles';
 
@@ -63,31 +64,6 @@ export const staffService = {
       (error) => {
         console.warn('Staff snapshot listener warning:', error);
         callback(isDevDemoEnabled() ? [...INITIAL_STAFF, ...INITIAL_TRAINERS] : []);
-      }
-    );
-  },
-
-  /**
-   * Real-time subscription to floor coaches (publicly viewable)
-   */
-  subscribeTrainers(callback: (trainers: UserProfile[]) => void): () => void {
-    const q = query(
-      collection(db, PROFILES_COLLECTION),
-      where('role', '==', 'trainer')
-    );
-    return onSnapshot(
-      q,
-      (snap) => {
-        if (!snap.empty) {
-          const trainers = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
-          callback(trainers);
-        } else {
-          callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
-        }
-      },
-      (error) => {
-        console.warn('Trainers snapshot listener warning:', error);
-        callback(isDevDemoEnabled() ? INITIAL_TRAINERS : []);
       }
     );
   },
@@ -172,7 +148,12 @@ export const staffService = {
         updatedAt: serverTimestamp()
       });
 
-      // 3. Audit log
+      // 3. If trainer, sync safe display fields into public_trainers
+      if (data.role === 'trainer') {
+        await trainerService.syncPublicTrainer(newStaffProfile, true);
+      }
+
+      // 4. Audit log
       await auditService.logAuditEvent(
         creatorName,
         'STAFF_CREATED',
@@ -199,6 +180,9 @@ export const staffService = {
         updatedAt: serverTimestamp()
       });
 
+      // Update public_trainers visibility if this staff member has a public card
+      await trainerService.setPublicTrainerVisibility(uid, isActive);
+
       await auditService.logAuditEvent(
         actorName,
         isActive ? 'STAFF_ACTIVATED' : 'STAFF_SUSPENDED',
@@ -222,6 +206,11 @@ export const staffService = {
         role: newRole,
         updatedAt: serverTimestamp()
       });
+
+      // If demoted from trainer, hide public card
+      if (newRole !== 'trainer') {
+        await trainerService.setPublicTrainerVisibility(uid, false);
+      }
 
       await auditService.logAuditEvent(
         actorName,
@@ -247,6 +236,15 @@ export const staffService = {
         updatedAt: serverTimestamp()
       }, { merge: true });
 
+      // If updated fields affect public trainer card, sync safe fields
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const fullProfile = { ...snap.data(), id: uid } as UserProfile;
+        if (fullProfile.role === 'trainer') {
+          await trainerService.syncPublicTrainer(fullProfile);
+        }
+      }
+
       await auditService.logAuditEvent(
         actorName,
         'STAFF_PROFILE_UPDATED',
@@ -266,6 +264,9 @@ export const staffService = {
     const path = `${PROFILES_COLLECTION}/${uid}`;
     try {
       await deleteDoc(doc(db, PROFILES_COLLECTION, uid));
+      // Also remove any public trainer card
+      await trainerService.deletePublicTrainer(uid);
+
       await auditService.logAuditEvent(
         actorName,
         'STAFF_DELETED',
