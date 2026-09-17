@@ -280,18 +280,6 @@ class DataService {
     } else {
       this.trainers.push(trainer);
     }
-    const publicIdx = this.publicTrainers.findIndex(pt => pt.id === trainer.id);
-    if (publicIdx >= 0) {
-      this.publicTrainers[publicIdx] = {
-        ...this.publicTrainers[publicIdx],
-        displayName: trainer.fullName,
-        avatarUrl: trainer.avatarUrl || this.publicTrainers[publicIdx].avatarUrl,
-        specialty: trainer.fitnessGoal || this.publicTrainers[publicIdx].specialty,
-        experience: trainer.experience || this.publicTrainers[publicIdx].experience,
-        bio: trainer.bio || this.publicTrainers[publicIdx].bio,
-        isPublic: trainer.isActive !== false
-      };
-    }
     trainerService.updateTrainer(trainer).catch(e => console.warn('Could not persist trainer:', e));
     this.addAudit(trainer.fullName, 'TRAINER_PROFILE_UPDATED', 'UserProfile', trainer.id, `Profile details & photo updated for ${trainer.fullName}`);
     this.notify();

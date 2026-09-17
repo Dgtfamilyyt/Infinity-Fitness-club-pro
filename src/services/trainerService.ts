@@ -98,10 +98,11 @@ export const trainerService = {
   },
 
   /**
-   * Syncs safe display fields into public_trainers/{trainerId} when an admin or trainer
-   * updates their coaching profile.
-   * STRICT PRIVACY: NEVER copies email, phone, authUid, uid, role permissions, trainerNotes,
-   * payment data, audit data, membership data, QR tokens, restrictions, or internal notes.
+   * Syncs safe display fields into public_trainers/{trainerId} for authorized admin/owner workflows.
+   * Only sanitized fields may be copied:
+   * displayName, avatarUrl, specialty, experience, bio, displayOrder, isPublic, gymId.
+   * STRICT PRIVACY: NEVER copies email, phone, authUid, uid, trainerNotes,
+   * payments, restrictions, or internal metadata.
    */
   async syncPublicTrainer(profile: UserProfile, isPublicOverride?: boolean): Promise<void> {
     if (profile.role !== 'trainer') return;
@@ -116,7 +117,7 @@ export const trainerService = {
         displayName: profile.fullName || 'Certified Floor Coach',
         gymId: 'infinity-neelambur',
         isPublic,
-        displayOrder: profile.displayOrder ?? 1
+        displayOrder: typeof profile.displayOrder === 'number' ? profile.displayOrder : 1
       };
 
       if (profile.avatarUrl) safeDoc.avatarUrl = profile.avatarUrl;
@@ -124,7 +125,7 @@ export const trainerService = {
       if (profile.experience) safeDoc.experience = profile.experience;
       if (profile.bio) safeDoc.bio = profile.bio;
 
-      await setDoc(ref, safeDoc, { merge: true });
+      await setDoc(ref, safeDoc);
     } catch (error) {
       console.warn('Could not sync public trainer document:', error);
     }
@@ -157,7 +158,9 @@ export const trainerService = {
   },
 
   /**
-   * Updates internal private trainer profile in profiles/{uid}, and syncs safe fields to public_trainers.
+   * Updates internal private trainer profile in profiles/{uid}.
+   * Note: Does NOT silently sync trainer self-edits directly into public_trainers.
+   * Public-facing publication into public_trainers/{trainerId} requires admin/owner approval.
    */
   async updateTrainer(trainer: UserProfile): Promise<void> {
     try {
@@ -166,9 +169,6 @@ export const trainerService = {
         ...trainer,
         updatedAt: serverTimestamp()
       }, { merge: true });
-
-      // Automatically sync safe public display fields
-      await this.syncPublicTrainer(trainer);
     } catch (error) {
       console.warn('Could not persist trainer update to Firestore:', error);
     }

@@ -851,8 +851,8 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
           trainer={selectedTrainerForEdit}
           isOpen={true}
           onClose={() => setSelectedTrainerForEdit(null)}
-          onSave={(updated) => {
-            dataService.updateTrainer(updated);
+          onSave={async (updated) => {
+            await dataService.updateStaffProfile(updated.id, updated, currentUser?.fullName || 'Club Director');
             setSelectedTrainerForEdit(null);
           }}
         />

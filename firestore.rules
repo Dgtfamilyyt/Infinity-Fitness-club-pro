@@ -100,8 +100,8 @@ service cloud.firestore {
     match /public_trainers/{trainerId} {
       // Public read access for active trainer cards; staff can view all trainer cards
       allow read: if (resource == null || resource.data.isPublic == true) || isStaff();
-      // Write access restricted to admin or owner, or active trainer updating their own card
-      allow write: if isAdminOrOwner() || (isTrainer() && request.auth.uid == trainerId);
+      // Write access restricted exclusively to admin or owner (publishing boundary)
+      allow write: if isAdminOrOwner();
     }
 
     // ==========================================
