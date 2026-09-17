@@ -24,6 +24,16 @@ const PROFILES_COLLECTION = 'profiles';
 const QR_TOKENS_COLLECTION = 'qr_tokens';
 const MEMBERSHIPS_COLLECTION = 'memberships';
 
+/**
+ * Sanitizes member records for staff roster queries so that raw QR tokens
+ * are never broadly exposed in staff directory reads.
+ */
+function sanitizeMemberForStaff(member: UserProfile): UserProfile {
+  const sanitized = { ...member };
+  delete sanitized.qrToken;
+  return sanitized;
+}
+
 export const memberService = {
   async getMembers(): Promise<UserProfile[]> {
     try {
@@ -33,12 +43,12 @@ export const memberService = {
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return isDevDemoEnabled() ? INITIAL_MEMBERS : [];
+        return isDevDemoEnabled() ? INITIAL_MEMBERS.map(sanitizeMemberForStaff) : [];
       }
-      return snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
+      return snap.docs.map(d => sanitizeMemberForStaff({ ...d.data(), id: d.id } as UserProfile));
     } catch (error) {
       console.warn('Could not read members from Firestore:', error);
-      return isDevDemoEnabled() ? INITIAL_MEMBERS : [];
+      return isDevDemoEnabled() ? INITIAL_MEMBERS.map(sanitizeMemberForStaff) : [];
     }
   },
 
@@ -51,15 +61,15 @@ export const memberService = {
       q,
       (snap) => {
         if (!snap.empty) {
-          const members = snap.docs.map(d => ({ ...d.data(), id: d.id } as UserProfile));
+          const members = snap.docs.map(d => sanitizeMemberForStaff({ ...d.data(), id: d.id } as UserProfile));
           callback(members);
         } else {
-          callback(isDevDemoEnabled() ? INITIAL_MEMBERS : []);
+          callback(isDevDemoEnabled() ? INITIAL_MEMBERS.map(sanitizeMemberForStaff) : []);
         }
       },
       (error) => {
         console.warn('Members snapshot listener error:', error);
-        callback(isDevDemoEnabled() ? INITIAL_MEMBERS : []);
+        callback(isDevDemoEnabled() ? INITIAL_MEMBERS.map(sanitizeMemberForStaff) : []);
       }
     );
   },

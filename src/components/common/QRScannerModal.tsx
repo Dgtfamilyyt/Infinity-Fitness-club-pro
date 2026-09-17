@@ -74,7 +74,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose,
       setCheckInResult({
         success: false,
         status: 'CHECK_IN_REFUSED',
-        message: err?.message || 'Check-in processing failed. Please verify credentials.'
+        message: err?.message || 'Attendance could not be confirmed. Please reconnect and retry.'
       });
     } finally {
       isProcessingRef.current = false;
@@ -260,7 +260,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ isOpen, onClose,
         setCheckoutNotice(res.message);
       }
     } catch (e: any) {
-      setCheckoutNotice(e?.message || 'Check-out failed.');
+      setCheckoutNotice(e?.message || 'Attendance could not be confirmed. Please reconnect and retry.');
     } finally {
       setIsCheckingOut(false);
     }

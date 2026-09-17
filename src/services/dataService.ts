@@ -39,6 +39,7 @@ import { progressService } from './progressService';
 import { auditService } from './auditService';
 import { attendanceService } from './attendanceService';
 import { staffService } from './staffService';
+import { generateCryptographicQrToken } from './qrService';
 
 /**
  * DataService acts as the reactive client-side cache and coordinator.
@@ -134,6 +135,8 @@ class DataService {
     if (!user) {
       this.currentUserWorkout = null;
       this.auditLogs = [];
+      this.activeSessions = isDevDemoEnabled() ? INITIAL_ACTIVE_SESSIONS : [];
+      this.attendanceLogs = isDevDemoEnabled() ? INITIAL_ATTENDANCE_LOGS : [];
       this.notify();
       return;
     }
@@ -159,7 +162,7 @@ class DataService {
           })
         );
       }
-      // Staff members get access to Member list and full Staff Directory
+      // Staff members get access to Member list, Staff Directory, Active Sessions, and Attendance Logs
       if (isStaff) {
         this.roleUnsubs.push(
           memberService.subscribeMembers((members) => {
@@ -175,6 +178,24 @@ class DataService {
             this.notify();
           })
         );
+
+        this.roleUnsubs.push(
+          attendanceService.subscribeActiveSessions((sessions) => {
+            this.activeSessions = sessions;
+            this.notify();
+          })
+        );
+
+        this.roleUnsubs.push(
+          attendanceService.subscribeAttendanceLogs((logs) => {
+            this.attendanceLogs = logs;
+            this.notify();
+          })
+        );
+      } else {
+        // Non-staff (e.g. members, visitors) should never hold active floor session data
+        this.activeSessions = isDevDemoEnabled() ? INITIAL_ACTIVE_SESSIONS : [];
+        this.attendanceLogs = isDevDemoEnabled() ? INITIAL_ATTENDANCE_LOGS : [];
       }
 
       // Only Admins and Owners get access to sensitive Payments and Audit Logs
@@ -563,7 +584,7 @@ class DataService {
       restrictions: memberData.restrictions || 'None',
       attendanceStreak: 0,
       workoutStreak: 0,
-      qrToken: `IFC1.${Math.random().toString(36).substring(2)}${Math.random().toString(36).substring(2)}`
+      qrToken: generateCryptographicQrToken()
     };
 
     this.members = [newMember, ...this.members];

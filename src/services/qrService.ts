@@ -7,7 +7,11 @@
  * - Absolutely NO PII (name, phone, email, medical notes) is stored in the QR code or token
  */
 
+import { isDevDemoEnabled } from './devMode';
+
 export const QR_TOKEN_VERSION = 'IFC1';
+
+export const STRICT_QR_TOKEN_REGEX = /^IFC1\.[0-9a-fA-F]{64}$/;
 
 /**
  * Generates an opaque, cryptographically secure token
@@ -68,14 +72,16 @@ export function isValidQrTokenFormat(token: string): boolean {
   if (!token || typeof token !== 'string') return false;
   const trimmed = token.trim();
   
-  // Primary modern format: IFC1.<64-hex>
-  if (trimmed.startsWith(`${QR_TOKEN_VERSION}.`) && trimmed.length >= 37) {
+  // Authoritative production format: IFC1.<64-character-hex>
+  if (STRICT_QR_TOKEN_REGEX.test(trimmed)) {
     return true;
   }
   
-  // Backwards compatibility with initial seed tokens
-  if (trimmed.startsWith('IFC_TOKEN_SEC_') || trimmed.startsWith('QR-IFC-')) {
-    return true;
+  // Backwards compatibility with legacy seed tokens ONLY in DEV / demo mode
+  if (isDevDemoEnabled()) {
+    if (trimmed.startsWith('IFC_TOKEN_SEC_') || trimmed.startsWith('QR-IFC-')) {
+      return true;
+    }
   }
 
   return false;

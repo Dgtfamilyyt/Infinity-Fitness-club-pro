@@ -149,6 +149,7 @@ export interface ActiveGymSession {
   trainerName?: string;
   method: 'QR' | 'MEMBER_ID' | 'MANUAL';
   checkedInBy?: string;
+  attendanceRecordId?: string;
 }
 
 export interface AttendanceRecord {
@@ -159,6 +160,7 @@ export interface AttendanceRecord {
   arrival: string;
   arrivedAtMs?: number;
   exit?: string;
+  exitedAt?: string;
   exitedAtMs?: number;
   durationMinutes?: number;
   workoutName: string;
@@ -167,6 +169,7 @@ export interface AttendanceRecord {
   date: string;
   checkedInBy?: string;
   checkedOutBy?: string;
+  updatedAt?: any;
 }
 
 export interface QrTokenRecord {

@@ -63,20 +63,22 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
       });
       setScanMessage({ success: res.success, text: res.message });
     } catch {
-      const fallback = dataService.checkInMember(manualInput, 'MANUAL', 'Reception Desk');
-      setScanMessage({ success: fallback.success, text: fallback.message });
+      setScanMessage({ success: false, text: 'Attendance could not be confirmed. Please reconnect and retry.' });
     }
     setManualInput('');
   };
 
   const handleCheckOut = async (sessionId: string) => {
     try {
-      await attendanceService.processMemberCheckOut({
+      const res = await attendanceService.processMemberCheckOut({
         memberUid: sessionId,
         staffName: 'Reception Desk'
       });
+      if (!res.success) {
+        setScanMessage({ success: false, text: res.message });
+      }
     } catch {
-      dataService.checkOutMember(sessionId, 'Reception Desk');
+      setScanMessage({ success: false, text: 'Attendance could not be confirmed. Please reconnect and retry.' });
     }
   };
 
