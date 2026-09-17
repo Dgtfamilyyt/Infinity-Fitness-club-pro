@@ -131,7 +131,12 @@ service cloud.firestore {
     // 4. USER PROFILES
     // ==========================================
     match /profiles/{userId} {
-      allow read: if isBootstrap() || resource.data.role == 'trainer' || (signedIn() && (myUid() == userId || isStaff()));
+      // Direct self-read for authenticated user: strictly allows reading own document
+      // Evaluated first so self-read never fails on missing doc or staff recursion
+      allow read: if (request.auth != null && request.auth.uid == userId)
+                  || isStaff()
+                  || (resource != null && resource.data.role == 'trainer')
+                  || isBootstrap();
 
       allow create: if isBootstrap() || (signedIn() && (
         isAdminOrOwner() || 

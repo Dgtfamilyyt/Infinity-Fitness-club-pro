@@ -11,7 +11,9 @@ import {
   saveUserProfile, 
   logoutUser,
   subscribeToAuth,
-  AppAuthUser
+  AppAuthUser,
+  firebaseConfig,
+  ProfileResolutionResult
 } from './lib/firebase';
 import { Navbar } from './components/layout/Navbar';
 import { PublicLanding } from './components/member/PublicLanding';
@@ -28,10 +30,30 @@ import {
   LogOut, 
   ArrowLeft, 
   CheckCircle2, 
-  Lock 
+  Lock,
+  AlertTriangle,
+  WifiOff
 } from 'lucide-react';
 
 type AppRoute = 'HOME' | 'MEMBER_LOGIN' | 'STAFF_LOGIN' | 'MEMBER_DASHBOARD' | 'STAFF_PORTAL';
+
+type AccountStatus = 
+  | 'OK' 
+  | 'PROFILE_NOT_FOUND' 
+  | 'PROFILE_INVALID' 
+  | 'PERMISSION_DENIED' 
+  | 'FIRESTORE_ERROR' 
+  | 'DENIED' 
+  | 'INACTIVE';
+
+interface AuthDiagnosticData {
+  uid: string;
+  email: string;
+  profilePath: string;
+  resultStatus: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
 
 export default function App() {
   // Real-time data sync from DataService
@@ -65,8 +87,20 @@ export default function App() {
   // Auth State
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [accountStatus, setAccountStatus] = useState<'OK' | 'UNCONFIGURED' | 'DENIED' | 'INACTIVE'>('OK');
+  const [accountStatus, setAccountStatus] = useState<AccountStatus>('OK');
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [authDiagnostics, setAuthDiagnostics] = useState<AuthDiagnosticData | null>(null);
   const [denialMessage, setDenialMessage] = useState<string>('');
+
+  // Requirement 2: Development & debug diagnostics mode detection
+  const isDevOrDebug = 
+    import.meta.env.DEV || 
+    (typeof window !== 'undefined' && (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname.includes('run.app') ||
+      window.location.search.includes('debug') ||
+      window.location.hash.includes('debug')
+    ));
 
   // Initial Route Check from URL pathname or hash
   useEffect(() => {
@@ -88,6 +122,8 @@ export default function App() {
   const navigateTo = useCallback((targetRoute: AppRoute) => {
     setRoute(targetRoute);
     setAccountStatus('OK');
+    setStatusMessage('');
+    setAuthDiagnostics(null);
     setDenialMessage('');
 
     let path = '/';
@@ -113,6 +149,8 @@ export default function App() {
         dataService.syncForUser(null);
         setCurrentUser(null);
         setAccountStatus('OK');
+        setStatusMessage('');
+        setAuthDiagnostics(null);
         setAuthLoading(false);
 
         // If currently in a protected route, redirect to the corresponding login
@@ -124,38 +162,81 @@ export default function App() {
         return;
       }
 
-      // User is authenticated: resolve profile strictly from Firestore profiles/{uid}
-      const userEmail = (authUser.email || '').toLowerCase().trim();
+      // Requirement 4: After Google login log auth.currentUser.uid, then read exactly profiles/{auth.currentUser.uid}
+      console.log(`[AUTH DEBUG] auth.currentUser.uid: ${authUser.uid}`);
+      const profilePath = `profiles/${authUser.uid}`;
+      console.log(`[AUTH DEBUG] Reading exactly: ${profilePath}`);
 
       try {
-        // 1. Check Firestore by UID: profiles/{uid}
-        let profile = await getUserProfile(authUser.uid);
+        // Requirement 1 & 7: Distinct profile resolution and validation
+        const result: ProfileResolutionResult = await getUserProfile(authUser.uid);
 
-        // 2. If not found by UID yet, check if reception pre-registered this email
-        if (!profile && userEmail) {
-          const preRegistered = await fetchUserProfileByEmail(userEmail) || dataService.findProfileByEmail(userEmail);
-          if (preRegistered) {
-            // Bind the verified Firebase Auth UID to the pre-registered profile
-            profile = {
-              ...preRegistered,
-              uid: authUser.uid,
-              id: authUser.uid
-            };
-            dataService.upsertProfile(profile);
-            await saveUserProfile(profile).catch((e) => console.warn('Profile sync notice:', e));
-          }
-        }
+        // Record diagnostics for Requirement 2
+        setAuthDiagnostics({
+          uid: authUser.uid,
+          email: authUser.email || '',
+          profilePath,
+          resultStatus: result.status,
+          errorCode: 'code' in result ? result.code : undefined,
+          errorMessage: 'message' in result ? result.message : ('reason' in result ? result.reason : undefined)
+        });
 
-        // 3. If profile does not exist, user is unconfigured (Google login does NOT auto-create membership or staff roles)
-        if (!profile) {
+        // Requirement 5: Email fallback (fetchUserProfileByEmail / dataService.findProfileByEmail)
+        // is disabled during debugging to verify canonical profiles/{Firebase UID} path first.
+
+        // Requirement 8: Replace single UNCONFIGURED handling with:
+        // PROFILE_NOT_FOUND, PROFILE_INVALID, PERMISSION_DENIED, FIRESTORE_ERROR
+        if (result.status === 'NOT_FOUND') {
+          console.warn(`[AUTH RESOLUTION] NOT_FOUND: Profile document does not exist at ${profilePath}`);
           dataService.syncForUser(null);
           setCurrentUser(null);
-          setAccountStatus('UNCONFIGURED');
+          setAccountStatus('PROFILE_NOT_FOUND');
+          setStatusMessage('Account not configured.');
           setAuthLoading(false);
           return;
         }
 
-        // 4. Check if profile is inactive or suspended
+        if (result.status === 'PROFILE_INVALID') {
+          console.warn(`[AUTH RESOLUTION] PROFILE_INVALID: Document at ${profilePath} is invalid:`, result.reason);
+          dataService.syncForUser(null);
+          setCurrentUser(null);
+          setAccountStatus('PROFILE_INVALID');
+          setStatusMessage('Account profile is incomplete.');
+          setAuthLoading(false);
+          return;
+        }
+
+        if (result.status === 'PERMISSION_DENIED') {
+          console.error(`[AUTH RESOLUTION] PERMISSION_DENIED: Access denied to ${profilePath} (code: ${result.code})`);
+          dataService.syncForUser(null);
+          setCurrentUser(null);
+          setAccountStatus('PERMISSION_DENIED');
+          setStatusMessage('Account exists, but access to the gym database was denied.');
+          setAuthLoading(false);
+          return;
+        }
+
+        if (result.status === 'FIRESTORE_ERROR') {
+          console.error(`[AUTH RESOLUTION] FIRESTORE_ERROR: Network/database failure reading ${profilePath}:`, result.message);
+          dataService.syncForUser(null);
+          setCurrentUser(null);
+          setAccountStatus('FIRESTORE_ERROR');
+          setStatusMessage('Unable to connect to the gym database.');
+          setAuthLoading(false);
+          return;
+        }
+
+        // FOUND: Valid active profile
+        const profile = result.profile;
+        console.log(`[AUTH RESOLUTION] FOUND: Successfully resolved profile for UID ${authUser.uid}:`, {
+          fullName: profile.fullName,
+          email: profile.email,
+          role: profile.role,
+          gymId: profile.gymId,
+          isActive: profile.isActive
+        });
+
+        // Check if profile is inactive or suspended
         if (profile.isActive === false) {
           dataService.syncForUser(null);
           setCurrentUser(profile);
@@ -164,12 +245,13 @@ export default function App() {
           return;
         }
 
-        // 5. Valid active profile: sync role-scoped records and establish authorized session
+        // Valid active profile: sync role-scoped records and establish authorized session
         dataService.syncForUser(profile);
         setCurrentUser(profile);
         setAccountStatus('OK');
+        setStatusMessage('');
 
-        // 6. Authoritative role-based routing (Role determines the view, never the client)
+        // Authoritative role-based routing (Role determines the view, never the client)
         if (profile.role === 'member') {
           setRoute(prev => {
             if (prev === 'STAFF_PORTAL' || prev === 'STAFF_LOGIN') {
@@ -189,9 +271,18 @@ export default function App() {
           setStaffSubView('ADMIN');
           setRoute(prev => (prev === 'HOME' ? 'HOME' : 'STAFF_PORTAL'));
         }
-      } catch (err) {
-        console.error('Error resolving user profile:', err);
-        setAccountStatus('UNCONFIGURED');
+      } catch (err: any) {
+        console.error('Unexpected error resolving user profile:', err);
+        setAccountStatus('FIRESTORE_ERROR');
+        setStatusMessage('Unable to connect to the gym database.');
+        setAuthDiagnostics({
+          uid: authUser.uid,
+          email: authUser.email || '',
+          profilePath,
+          resultStatus: 'FIRESTORE_ERROR',
+          errorCode: err?.code,
+          errorMessage: err?.message || String(err)
+        });
       } finally {
         setAuthLoading(false);
       }
@@ -207,6 +298,8 @@ export default function App() {
       await logoutUser();
       setCurrentUser(null);
       setAccountStatus('OK');
+      setStatusMessage('');
+      setAuthDiagnostics(null);
       setDenialMessage('');
       
       // Route after logout
@@ -247,23 +340,125 @@ export default function App() {
     );
   }
 
-  // 2. Unconfigured Account Screen
-  if (accountStatus === 'UNCONFIGURED') {
+  // 2. Profile Resolution Error Screens per Requirement 8 & Requirement 2
+  if (
+    accountStatus === 'PROFILE_NOT_FOUND' ||
+    accountStatus === 'PROFILE_INVALID' ||
+    accountStatus === 'PERMISSION_DENIED' ||
+    accountStatus === 'FIRESTORE_ERROR'
+  ) {
+    const errorConfigs = {
+      PROFILE_NOT_FOUND: {
+        title: 'ACCOUNT NOT CONFIGURED',
+        message: 'Account not configured.',
+        description: 'Please contact Infinity Fitness Club reception. Your Google account does not have a linked membership or staff profile registered in the club database.',
+        icon: ShieldAlert,
+        color: 'text-amber-400',
+        bg: 'bg-amber-500/20',
+        border: 'border-amber-500/30'
+      },
+      PROFILE_INVALID: {
+        title: 'PROFILE INCOMPLETE',
+        message: 'Account profile is incomplete.',
+        description: statusMessage || 'The profile document in Firestore exists, but is missing required attributes (uid, fullName, email, role, gymId, or isActive).',
+        icon: AlertTriangle,
+        color: 'text-amber-400',
+        bg: 'bg-amber-500/20',
+        border: 'border-amber-500/30'
+      },
+      PERMISSION_DENIED: {
+        title: 'DATABASE ACCESS DENIED',
+        message: 'Account exists, but access to the gym database was denied.',
+        description: 'Firestore security rules blocked access to this profile document. Please verify Firestore rules allow authenticated users to read their own profile.',
+        icon: Lock,
+        color: 'text-rose-400',
+        bg: 'bg-rose-500/20',
+        border: 'border-rose-500/30'
+      },
+      FIRESTORE_ERROR: {
+        title: 'DATABASE CONNECTION ERROR',
+        message: 'Unable to connect to the gym database.',
+        description: statusMessage || 'A network or Firestore communication error prevented profile verification.',
+        icon: WifiOff,
+        color: 'text-red-400',
+        bg: 'bg-red-500/20',
+        border: 'border-red-500/30'
+      }
+    };
+
+    const currentConfig = errorConfigs[accountStatus];
+    const IconComponent = currentConfig.icon;
+
     return (
-      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center select-none">
         <div className="w-full max-w-md p-8 rounded-3xl bg-[#121214] border border-zinc-800 shadow-2xl">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto">
-            <ShieldAlert className="w-6 h-6" />
+          <div className={`w-12 h-12 rounded-2xl ${currentConfig.bg} ${currentConfig.color} border ${currentConfig.border} flex items-center justify-center mx-auto`}>
+            <IconComponent className="w-6 h-6" />
           </div>
           <h2 className="mt-5 text-xl font-black uppercase text-white tracking-tight">
-            ACCOUNT NOT CONFIGURED
+            {currentConfig.title}
           </h2>
-          <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
-            Please contact Infinity Fitness Club reception.
+          <p className="mt-2 text-sm font-semibold text-zinc-200">
+            {currentConfig.message}
           </p>
-          <p className="mt-2 text-[11px] text-zinc-500">
-            Your account does not have a linked membership or staff profile registered in the club database.
+          <p className="mt-1.5 text-xs text-zinc-400 leading-relaxed">
+            {currentConfig.description}
           </p>
+
+          {/* Requirement 2: Temporary Development Diagnostics (Dev/Debug Mode Only) */}
+          {isDevOrDebug && authDiagnostics && (
+            <div className="mt-6 p-4 rounded-2xl bg-[#08080a] border border-zinc-800 text-left font-mono text-[11px] text-zinc-300 select-text">
+              <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-zinc-800/80">
+                <span className="font-bold text-amber-400 tracking-wider font-mono">AUTH DEBUG</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-sans font-semibold">
+                  DEV ONLY
+                </span>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <span className="text-zinc-500 text-[10px] uppercase font-sans">Project:</span>
+                  <p className="text-emerald-400 font-semibold break-all">{firebaseConfig.projectId}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 text-[10px] uppercase font-sans">Auth Domain:</span>
+                  <p className="text-zinc-300 break-all">{firebaseConfig.authDomain}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 text-[10px] uppercase font-sans">UID:</span>
+                  <p className="text-zinc-200 break-all">{authDiagnostics.uid}</p>
+                </div>
+                {authDiagnostics.email && (
+                  <div>
+                    <span className="text-zinc-500 text-[10px] uppercase font-sans">Email:</span>
+                    <p className="text-zinc-300 break-all">{authDiagnostics.email}</p>
+                  </div>
+                )}
+                <div>
+                  <span className="text-zinc-500 text-[10px] uppercase font-sans">Profile path:</span>
+                  <p className="text-cyan-400 break-all">{authDiagnostics.profilePath}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500 text-[10px] uppercase font-sans">Result:</span>
+                  <p className={`font-bold ${authDiagnostics.resultStatus === 'FOUND' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {authDiagnostics.resultStatus}
+                  </p>
+                </div>
+                {authDiagnostics.errorCode && (
+                  <div>
+                    <span className="text-zinc-500 text-[10px] uppercase font-sans">Error Code:</span>
+                    <p className="text-rose-400 font-bold break-all">{authDiagnostics.errorCode}</p>
+                  </div>
+                )}
+                {authDiagnostics.errorMessage && (
+                  <div>
+                    <span className="text-zinc-500 text-[10px] uppercase font-sans">Error Details:</span>
+                    <p className="text-zinc-400 text-[10px] break-all">{authDiagnostics.errorMessage}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="mt-6 pt-6 border-t border-zinc-800 flex gap-3">
             <button
               onClick={() => navigateTo('HOME')}

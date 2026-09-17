@@ -27,24 +27,33 @@ import { getAnalytics, isSupported } from 'firebase/analytics';
 import { getStorage } from 'firebase/storage';
 import { UserProfile, UserRole } from '../types';
 
-// Detect whether running on Vercel production domain to enable same-origin proxy auth handler
-export const getAuthDomain = (): string => {
-  if (typeof window !== 'undefined' && window.location.hostname === 'infinity-fitness-club-pro.vercel.app') {
-    return 'infinity-fitness-club-pro.vercel.app';
-  }
-  return 'infinity-fitness-club-52c50.firebaseapp.com';
-};
-
 // Configuration for Firebase Modular Web SDK (infinity-fitness-club-52c50)
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCLh948sZvd74VWRwFMw-hJxu5anPtQ7-8",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || getAuthDomain(),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "infinity-fitness-club-52c50.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "infinity-fitness-club-52c50",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "infinity-fitness-club-52c50.firebasestorage.app",
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "880588845668",
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:880588845668:web:da7b27c1ac83ad2f33a571",
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-V01RT496K8"
 };
+
+// Log active Firebase config on startup (never log secrets or tokens)
+if (typeof window !== 'undefined') {
+  console.log("[FIREBASE DEBUG]", {
+    projectId: firebaseConfig.projectId,
+    authDomain: firebaseConfig.authDomain,
+    storageBucket: firebaseConfig.storageBucket
+  });
+
+  // Verify runtime configuration values against requirements
+  if (firebaseConfig.projectId !== "infinity-fitness-club-52c50") {
+    console.error(`[FIREBASE CONFIG WARNING] Unexpected projectId: "${firebaseConfig.projectId}". Expected: "infinity-fitness-club-52c50". Verify VITE_FIREBASE_PROJECT_ID.`);
+  }
+  if (firebaseConfig.authDomain !== "infinity-fitness-club-52c50.firebaseapp.com") {
+    console.error(`[FIREBASE CONFIG WARNING] Unexpected authDomain: "${firebaseConfig.authDomain}". Expected: "infinity-fitness-club-52c50.firebaseapp.com". Verify VITE_FIREBASE_AUTH_DOMAIN.`);
+  }
+}
 
 // Initialize safely so Firebase is not initialized twice during development/HMR
 const app = getApps().length === 0 
@@ -246,85 +255,145 @@ export const logoutUser = async (): Promise<void> => {
   await fbSignOut(auth);
 };
 
+export type ProfileResolutionStatus = 
+  | 'FOUND'
+  | 'NOT_FOUND'
+  | 'PROFILE_INVALID'
+  | 'PERMISSION_DENIED'
+  | 'FIRESTORE_ERROR';
+
+export type ProfileResolutionResult =
+  | { status: 'FOUND'; profile: UserProfile }
+  | { status: 'NOT_FOUND' }
+  | { status: 'PROFILE_INVALID'; reason: string }
+  | { status: 'PERMISSION_DENIED'; code?: string; message?: string }
+  | { status: 'FIRESTORE_ERROR'; code?: string; message: string };
+
 // Authoritative Profile Lookup from Firestore: profiles/{uid}
-// STRICT: Does NOT default role or gymId
-export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
-  if (!uid) return null;
+// Distinct status handling per requirements:
+// A. NOT_FOUND: Firestore document does not exist
+// B. FOUND: Profile exists and is valid
+// C. PROFILE_INVALID: Document exists but missing required fields
+// D. PERMISSION_DENIED: Firestore security rules permission denied
+// E. FIRESTORE_ERROR: Network or Firestore connection error
+export const getUserProfile = async (uid: string): Promise<ProfileResolutionResult> => {
+  if (!uid) return { status: 'NOT_FOUND' };
+
+  const profilePath = `profiles/${uid}`;
+  console.log(`[FIREBASE AUTH] Reading profile document at: ${profilePath}`);
+
   try {
     const ref = doc(db, 'profiles', uid);
     const snap = await getDoc(ref);
+
     if (!snap.exists()) {
-      return null;
+      console.log(`[FIREBASE AUTH] Result for ${profilePath}: NOT_FOUND`);
+      return { status: 'NOT_FOUND' };
     }
+
     const data = snap.data();
-    
-    // Validate role strictly - DO NOT DEFAULT
+    console.log(`[FIREBASE AUTH] Document exists at ${profilePath}, inspecting data:`, data);
+
+    // Profile validation per Requirement 7:
+    // If the profile document exists, require:
+    // uid, fullName, email, role, gymId, isActive
+    // Valid roles: member, trainer, admin, owner
+    // Do not default missing role to member. Do not default missing gymId.
+    const invalidReasons: string[] = [];
+
+    const profileUid = typeof data.uid === 'string' && data.uid.trim() ? data.uid.trim() : snap.id;
+    if (!profileUid) invalidReasons.push('missing uid');
+
+    const fullName = typeof data.fullName === 'string' && data.fullName.trim() ? data.fullName.trim() : '';
+    if (!fullName) invalidReasons.push('missing or empty fullName');
+
+    const email = typeof data.email === 'string' && data.email.trim() ? data.email.trim() : '';
+    if (!email) invalidReasons.push('missing or empty email');
+
     const role = data.role as UserRole;
     if (!role || !VALID_ROLES.includes(role)) {
-      console.warn(`[AUTH] Rejecting profile for UID ${uid}: Invalid or missing role "${data.role}"`);
-      return null;
+      invalidReasons.push(`invalid role "${data.role}" (must be member, trainer, admin, or owner)`);
     }
 
-    // Validate gymId strictly - DO NOT DEFAULT
     const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
     if (!gymId) {
-      console.warn(`[AUTH] Rejecting profile for UID ${uid}: Missing gymId`);
-      return null;
+      invalidReasons.push('missing or empty gymId');
     }
 
-    return {
+    if (typeof data.isActive !== 'boolean') {
+      invalidReasons.push('missing or invalid isActive flag (must be boolean)');
+    }
+
+    if (invalidReasons.length > 0) {
+      const reason = `Profile at ${profilePath} is incomplete: ${invalidReasons.join(', ')}`;
+      console.warn(`[FIREBASE AUTH] Result for ${profilePath}: PROFILE_INVALID (${reason})`);
+      return {
+        status: 'PROFILE_INVALID',
+        reason
+      };
+    }
+
+    const validatedProfile: UserProfile = {
       ...data,
       id: snap.id,
-      uid: snap.id,
-      fullName: data.fullName || '',
-      email: data.email || '',
+      uid: profileUid,
+      fullName,
+      email,
       role,
       gymId,
-      isActive: data.isActive !== false
+      isActive: data.isActive
     } as UserProfile;
-  } catch (err) {
-    console.warn('Profile fetch notice for UID:', uid, err);
-    return null;
+
+    console.log(`[FIREBASE AUTH] Result for ${profilePath}: FOUND`, {
+      uid: validatedProfile.uid,
+      fullName: validatedProfile.fullName,
+      email: validatedProfile.email,
+      role: validatedProfile.role,
+      gymId: validatedProfile.gymId,
+      isActive: validatedProfile.isActive
+    });
+
+    return {
+      status: 'FOUND',
+      profile: validatedProfile
+    };
+  } catch (err: any) {
+    const code = err?.code || 'unknown';
+    const message = err?.message || String(err);
+    console.error(`[FIREBASE AUTH] Error reading ${profilePath}:`, { code, message, raw: err });
+
+    if (
+      code === 'permission-denied' || 
+      code === 'firestore/permission-denied' ||
+      message.includes('permission-denied') || 
+      message.includes('Missing or insufficient permissions')
+    ) {
+      console.error(`[FIREBASE AUTH] Result for ${profilePath}: PERMISSION_DENIED (code: ${code})`);
+      return {
+        status: 'PERMISSION_DENIED',
+        code,
+        message
+      };
+    }
+
+    console.error(`[FIREBASE AUTH] Result for ${profilePath}: FIRESTORE_ERROR (code: ${code})`);
+    return {
+      status: 'FIRESTORE_ERROR',
+      code,
+      message
+    };
   }
 };
 
 // Backward-compatible alias
 export const fetchUserProfile = getUserProfile;
 
-export const fetchUserProfileByEmail = async (email: string): Promise<UserProfile | null> => {
-  if (!email) return null;
-  try {
-    const cleanEmail = email.trim().toLowerCase();
-    const q = query(
-      collection(db, 'profiles'),
-      where('email', '==', cleanEmail),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const firstDoc = snap.docs[0];
-      const data = firstDoc.data();
-      const role = data.role as UserRole;
-      if (!role || !VALID_ROLES.includes(role)) return null;
-      const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
-      if (!gymId) return null;
-
-      return {
-        ...data,
-        id: firstDoc.id,
-        uid: firstDoc.id,
-        fullName: data.fullName || '',
-        email: data.email || cleanEmail,
-        role,
-        gymId,
-        isActive: data.isActive !== false
-      } as UserProfile;
-    }
-    return null;
-  } catch (err) {
-    console.warn('Profile fetch by email notice:', err);
-    return null;
-  }
+// Temporarily disabled for UID-first canonical debugging per Requirement 5:
+// "For debugging, disable: fetchUserProfileByEmail(...) dataService.findProfileByEmail(...)
+// We need to verify the canonical path first: profiles/{Firebase UID}"
+export const fetchUserProfileByEmail = async (_email: string): Promise<UserProfile | null> => {
+  console.log('[FIREBASE AUTH] fetchUserProfileByEmail is disabled during canonical UID resolution verification.');
+  return null;
 };
 
 export const saveUserProfile = async (profile: UserProfile): Promise<void> => {
