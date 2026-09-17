@@ -7,6 +7,8 @@ export type ZoneStatus = 'AVAILABLE' | 'BUSY' | 'FULL';
 export interface UserProfile {
   id: string;
   uid?: string;
+  authUid?: string | null;
+  authLinked?: boolean;
   email: string;
   fullName: string;
   phone?: string;

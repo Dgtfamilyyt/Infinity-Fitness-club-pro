@@ -292,16 +292,25 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
               ))}
             </div>
 
-            {/* Search */}
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search member, ID, email..."
-                value={memberSearch}
-                onChange={(e) => setMemberSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-emerald-500"
-              />
+            {/* Search and Action */}
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search member, ID, email..."
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <button
+                onClick={() => setShowAddMember(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-wider transition shrink-0 shadow-lg shadow-emerald-500/10"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Pre-register Member</span>
+              </button>
             </div>
           </div>
 
@@ -737,7 +746,10 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-md rounded-2xl bg-[#121214] border border-zinc-800 p-6 text-white shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-              <h3 className="font-bold text-sm text-white">Enroll New Athlete</h3>
+              <div>
+                <h3 className="font-bold text-sm text-white uppercase tracking-wide">Pre-register Member</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Login access is linked automatically when this registered email signs in for the first time.</p>
+              </div>
               <button onClick={() => setShowAddMember(false)} className="text-zinc-400 hover:text-white">✕</button>
             </div>
 
@@ -750,6 +762,18 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
                   placeholder="e.g. Sameer Verma"
                   value={newMemberName}
                   onChange={(e) => setNewMemberName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-zinc-400 uppercase font-semibold block mb-1">Email Address (for Google Login) *</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. sameer.verma@gmail.com"
+                  value={newMemberEmail}
+                  onChange={(e) => setNewMemberEmail(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -812,9 +836,9 @@ export const AdminOwnerPortal: React.FC<AdminOwnerPortalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold"
+                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold uppercase tracking-wider text-xs"
                 >
-                  Create Profile & Token
+                  Save Pre-registration
                 </button>
               </div>
             </form>

@@ -16,6 +16,7 @@ import {
   getDoc, 
   getDocFromServer,
   setDoc,
+  updateDoc,
   collection,
   query,
   where,
@@ -388,12 +389,264 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
 // Backward-compatible alias
 export const fetchUserProfile = getUserProfile;
 
-// Temporarily disabled for UID-first canonical debugging per Requirement 5:
-// "For debugging, disable: fetchUserProfileByEmail(...) dataService.findProfileByEmail(...)
-// We need to verify the canonical path first: profiles/{Firebase UID}"
-export const fetchUserProfileByEmail = async (_email: string): Promise<UserProfile | null> => {
-  console.log('[FIREBASE AUTH] fetchUserProfileByEmail is disabled during canonical UID resolution verification.');
-  return null;
+export type PreRegisterLookupResult =
+  | { status: 'FOUND'; profile: UserProfile; docId: string }
+  | { status: 'NOT_FOUND' }
+  | { status: 'DUPLICATE' }
+  | { status: 'ALREADY_LINKED'; linkedUid: string }
+  | { status: 'INVALID'; reason: string }
+  | { status: 'PERMISSION_DENIED'; code?: string }
+  | { status: 'ERROR'; message: string };
+
+/**
+ * Safe Pre-registration Email Lookup (Requirement 3):
+ * - normalize email using trim().toLowerCase()
+ * - query profiles where email == normalized email
+ * - limit(1)
+ * - validate role (member, trainer, admin, owner)
+ * - validate gymId
+ * - return pre-registered profile
+ * - never assign a role itself, never default role to member, never default gymId
+ * - return null if invalid
+ */
+export const fetchUserProfileByEmail = async (email: string): Promise<UserProfile | null> => {
+  if (!email || typeof email !== 'string') return null;
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  try {
+    const q = query(
+      collection(db, 'profiles'),
+      where('email', '==', cleanEmail),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      return null;
+    }
+
+    const docSnap = snap.docs[0];
+    const data = docSnap.data();
+
+    // Validate role
+    const role = data.role as UserRole;
+    if (!role || !VALID_ROLES.includes(role)) {
+      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} has invalid role:`, data.role);
+      return null;
+    }
+
+    // Validate gymId
+    const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
+    if (!gymId) {
+      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} is missing gymId`);
+      return null;
+    }
+
+    // Never default role, never default gymId
+    const profile: UserProfile = {
+      ...data,
+      id: docSnap.id,
+      email: cleanEmail,
+      role,
+      gymId,
+      fullName: typeof data.fullName === 'string' ? data.fullName.trim() : '',
+      isActive: typeof data.isActive === 'boolean' ? data.isActive : true
+    } as UserProfile;
+
+    return profile;
+  } catch (err) {
+    console.warn(`[FIREBASE AUTH] fetchUserProfileByEmail error for ${cleanEmail}:`, err);
+    return null;
+  }
+};
+
+/**
+ * Granular Pre-Registration Lookup with Duplicate & Link Verification (Requirements 3, 6, 8)
+ * - Queries profiles with limit(2) to safely detect duplicate accounts
+ * - Checks if profile is already linked to another authUid
+ * - Strictly validates required fields (fullName, email, role, gymId, isActive)
+ */
+export const lookupPreRegisteredProfile = async (
+  email: string,
+  currentAuthUid: string,
+  fallbackProfiles: UserProfile[] = []
+): Promise<PreRegisterLookupResult> => {
+  if (!email || typeof email !== 'string') return { status: 'NOT_FOUND' };
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return { status: 'NOT_FOUND' };
+
+  console.log(`[FIREBASE AUTH] Querying pre-registered profile for email: ${cleanEmail}`);
+
+  try {
+    // Query with limit(2) to safely detect duplicate email profiles (Requirement 6)
+    const q = query(
+      collection(db, 'profiles'),
+      where('email', '==', cleanEmail),
+      limit(2)
+    );
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      console.log(`[FIREBASE AUTH] No profile doc found via query for email: ${cleanEmail}. Checking local cache...`);
+      // Check fallbackProfiles if Firestore collection query returns empty
+      const localMatches = fallbackProfiles.filter(p => p.email && p.email.trim().toLowerCase() === cleanEmail);
+      if (localMatches.length > 1) {
+        return { status: 'DUPLICATE' };
+      }
+      if (localMatches.length === 1) {
+        const local = localMatches[0];
+        if (local.authLinked === true && local.authUid && local.authUid !== currentAuthUid) {
+          return { status: 'ALREADY_LINKED', linkedUid: local.authUid };
+        }
+        return {
+          status: 'FOUND',
+          profile: local,
+          docId: local.id
+        };
+      }
+      return { status: 'NOT_FOUND' };
+    }
+
+    // Requirement 6: If more than one pre-registration profile has the same normalized email:
+    // Do NOT auto-link. Return a safe error status: PROFILE_DUPLICATE_EMAIL
+    if (snap.docs.length > 1) {
+      console.warn(`[FIREBASE AUTH] Multiple profiles found with email: ${cleanEmail}`);
+      return { status: 'DUPLICATE' };
+    }
+
+    const docSnap = snap.docs[0];
+    const data = docSnap.data();
+
+    // Requirement 8: If pre-registered profile has:
+    // authLinked === true AND authUid exists AND authUid !== authUser.uid
+    // then stop and return: PROFILE_ALREADY_LINKED
+    if (data.authLinked === true && data.authUid && data.authUid !== currentAuthUid) {
+      console.warn(`[FIREBASE AUTH] Profile for ${cleanEmail} is already linked to another UID:`, data.authUid);
+      return { status: 'ALREADY_LINKED', linkedUid: data.authUid };
+    }
+
+    // Strict validation: require fullName, valid role, gymId, isActive
+    const invalidReasons: string[] = [];
+
+    const fullName = typeof data.fullName === 'string' && data.fullName.trim() ? data.fullName.trim() : '';
+    if (!fullName) invalidReasons.push('missing or empty fullName');
+
+    const role = data.role as UserRole;
+    if (!role || !VALID_ROLES.includes(role)) {
+      invalidReasons.push(`invalid role "${data.role}" (must be member, trainer, admin, or owner)`);
+    }
+
+    const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
+    if (!gymId) {
+      invalidReasons.push('missing or empty gymId');
+    }
+
+    if (typeof data.isActive !== 'boolean') {
+      invalidReasons.push('missing or invalid isActive flag (must be boolean)');
+    }
+
+    if (invalidReasons.length > 0) {
+      const reason = `Pre-registered profile has invalid data: ${invalidReasons.join(', ')}`;
+      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} is invalid:`, reason);
+      return { status: 'INVALID', reason };
+    }
+
+    const validProfile: UserProfile = {
+      ...data,
+      id: docSnap.id,
+      fullName,
+      email: cleanEmail,
+      role,
+      gymId,
+      isActive: data.isActive
+    } as UserProfile;
+
+    return {
+      status: 'FOUND',
+      profile: validProfile,
+      docId: docSnap.id
+    };
+  } catch (err: any) {
+    const code = err?.code || 'unknown';
+    const message = err?.message || String(err);
+    console.error(`[FIREBASE AUTH] Error in lookupPreRegisteredProfile for ${cleanEmail}:`, { code, message });
+
+    if (
+      code === 'permission-denied' ||
+      code === 'firestore/permission-denied' ||
+      message.includes('permission-denied') ||
+      message.includes('Missing or insufficient permissions')
+    ) {
+      const localMatches = fallbackProfiles.filter(p => p.email && p.email.trim().toLowerCase() === cleanEmail);
+      if (localMatches.length > 1) {
+        return { status: 'DUPLICATE' };
+      }
+      if (localMatches.length === 1) {
+        const local = localMatches[0];
+        if (local.authLinked === true && local.authUid && local.authUid !== currentAuthUid) {
+          return { status: 'ALREADY_LINKED', linkedUid: local.authUid };
+        }
+        return {
+          status: 'FOUND',
+          profile: local,
+          docId: local.id
+        };
+      }
+      return { status: 'PERMISSION_DENIED', code };
+    }
+
+    return { status: 'ERROR', message };
+  }
+};
+
+/**
+ * Pre-registration UID Linking (Requirements 4, 7, 8)
+ * - Writes canonical profile document at profiles/{authUser.uid}
+ * - Preserves all fields (role, gymId, membership, memberId, qrToken, etc.)
+ * - Sets id: authUser.uid, uid: authUser.uid, authUid: authUser.uid, authLinked: true
+ * - Updates old pre-registration document with authUid and authLinked (does NOT delete)
+ */
+export const linkPreRegisteredProfile = async (
+  oldDocId: string,
+  authUser: AppAuthUser,
+  preRegisteredProfile: UserProfile
+): Promise<UserProfile> => {
+  const normalizedEmail = (authUser.email || preRegisteredProfile.email).toLowerCase().trim();
+
+  const canonicalProfile: UserProfile = {
+    ...preRegisteredProfile,
+    id: authUser.uid,
+    uid: authUser.uid,
+    authUid: authUser.uid,
+    authLinked: true,
+    email: normalizedEmail
+  };
+
+  // 1. Create/save canonical profile at profiles/{authUser.uid}
+  const canonicalRef = doc(db, 'profiles', authUser.uid);
+  await setDoc(canonicalRef, {
+    ...canonicalProfile,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  console.log(`[FIREBASE AUTH] Created canonical profile at profiles/${authUser.uid} for ${normalizedEmail} with role "${canonicalProfile.role}"`);
+
+  // 2. Requirement 7: If oldDocId is different from authUser.uid, update the old document
+  if (oldDocId && oldDocId !== authUser.uid) {
+    try {
+      const oldRef = doc(db, 'profiles', oldDocId);
+      await updateDoc(oldRef, {
+        authUid: authUser.uid,
+        authLinked: true,
+        updatedAt: serverTimestamp()
+      });
+      console.log(`[FIREBASE AUTH] Updated pre-registration doc profiles/${oldDocId} with authUid=${authUser.uid} and authLinked=true`);
+    } catch (oldErr) {
+      console.warn(`[FIREBASE AUTH] Notice: could not update old pre-registration doc ${oldDocId}:`, oldErr);
+    }
+  }
+
+  return canonicalProfile;
 };
 
 export const saveUserProfile = async (profile: UserProfile): Promise<void> => {

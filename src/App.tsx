@@ -8,6 +8,8 @@ import {
   getUserProfile,
   fetchUserProfile, 
   fetchUserProfileByEmail,
+  lookupPreRegisteredProfile,
+  linkPreRegisteredProfile,
   saveUserProfile, 
   logoutUser,
   subscribeToAuth,
@@ -32,7 +34,8 @@ import {
   CheckCircle2, 
   Lock,
   AlertTriangle,
-  WifiOff
+  WifiOff,
+  Users
 } from 'lucide-react';
 
 type AppRoute = 'HOME' | 'MEMBER_LOGIN' | 'STAFF_LOGIN' | 'MEMBER_DASHBOARD' | 'STAFF_PORTAL';
@@ -41,6 +44,8 @@ type AccountStatus =
   | 'OK' 
   | 'PROFILE_NOT_FOUND' 
   | 'PROFILE_INVALID' 
+  | 'PROFILE_DUPLICATE_EMAIL'
+  | 'PROFILE_ALREADY_LINKED'
   | 'PERMISSION_DENIED' 
   | 'FIRESTORE_ERROR' 
   | 'DENIED' 
@@ -181,22 +186,80 @@ export default function App() {
           errorMessage: 'message' in result ? result.message : ('reason' in result ? result.reason : undefined)
         });
 
-        // Requirement 5: Email fallback (fetchUserProfileByEmail / dataService.findProfileByEmail)
-        // is disabled during debugging to verify canonical profiles/{Firebase UID} path first.
+        let activeProfile: UserProfile | null = null;
 
-        // Requirement 8: Replace single UNCONFIGURED handling with:
-        // PROFILE_NOT_FOUND, PROFILE_INVALID, PERMISSION_DENIED, FIRESTORE_ERROR
-        if (result.status === 'NOT_FOUND') {
-          console.warn(`[AUTH RESOLUTION] NOT_FOUND: Profile document does not exist at ${profilePath}`);
-          dataService.syncForUser(null);
-          setCurrentUser(null);
-          setAccountStatus('PROFILE_NOT_FOUND');
-          setStatusMessage('Account not configured.');
-          setAuthLoading(false);
-          return;
-        }
+        if (result.status === 'FOUND') {
+          activeProfile = result.profile;
+        } else if (result.status === 'NOT_FOUND') {
+          // Pre-registration Linking Workflow (Requirements 4, 5, 6, 7, 8)
+          const userEmail = authUser.email?.trim().toLowerCase();
+          if (userEmail) {
+            console.log(`[AUTH RESOLUTION] Querying pre-registered profile for email: ${userEmail}`);
+            const localProfiles = dataService.getAllProfiles();
+            const lookup = await lookupPreRegisteredProfile(userEmail, authUser.uid, localProfiles);
 
-        if (result.status === 'PROFILE_INVALID') {
+            if (lookup.status === 'DUPLICATE') {
+              console.warn(`[AUTH RESOLUTION] DUPLICATE email detected for ${userEmail}`);
+              dataService.syncForUser(null);
+              setCurrentUser(null);
+              setAccountStatus('PROFILE_DUPLICATE_EMAIL');
+              setStatusMessage('Multiple club profiles use this email. Please contact reception.');
+              setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'PROFILE_DUPLICATE_EMAIL' } : null);
+              setAuthLoading(false);
+              return;
+            }
+
+            if (lookup.status === 'ALREADY_LINKED') {
+              console.warn(`[AUTH RESOLUTION] Profile for ${userEmail} is already linked to another login (${lookup.linkedUid})`);
+              dataService.syncForUser(null);
+              setCurrentUser(null);
+              setAccountStatus('PROFILE_ALREADY_LINKED');
+              setStatusMessage('This club profile is already linked to another login. Please contact reception.');
+              setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'PROFILE_ALREADY_LINKED' } : null);
+              setAuthLoading(false);
+              return;
+            }
+
+            if (lookup.status === 'INVALID') {
+              console.warn(`[AUTH RESOLUTION] Pre-registered profile for ${userEmail} is invalid:`, lookup.reason);
+              dataService.syncForUser(null);
+              setCurrentUser(null);
+              setAccountStatus('PROFILE_INVALID');
+              setStatusMessage(lookup.reason);
+              setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'PROFILE_INVALID', errorMessage: lookup.reason } : null);
+              setAuthLoading(false);
+              return;
+            }
+
+            if (lookup.status === 'FOUND') {
+              console.log(`[AUTH RESOLUTION] Valid pre-registration found for ${userEmail} (${lookup.profile.role}). Linking to UID: ${authUser.uid}`);
+              try {
+                const canonical = await linkPreRegisteredProfile(lookup.docId, authUser, lookup.profile);
+                dataService.upsertProfile(canonical);
+                activeProfile = canonical;
+                setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'FOUND' } : null);
+              } catch (linkErr: any) {
+                console.error(`[AUTH RESOLUTION] Failed to link pre-registered profile:`, linkErr);
+                dataService.syncForUser(null);
+                setCurrentUser(null);
+                setAccountStatus('FIRESTORE_ERROR');
+                setStatusMessage('Unable to link pre-registered profile to your login credentials.');
+                setAuthLoading(false);
+                return;
+              }
+            }
+          }
+
+          if (!activeProfile) {
+            console.warn(`[AUTH RESOLUTION] NOT_FOUND: Profile document does not exist at ${profilePath} and no pre-registered email match`);
+            dataService.syncForUser(null);
+            setCurrentUser(null);
+            setAccountStatus('PROFILE_NOT_FOUND');
+            setStatusMessage('Account not configured.');
+            setAuthLoading(false);
+            return;
+          }
+        } else if (result.status === 'PROFILE_INVALID') {
           console.warn(`[AUTH RESOLUTION] PROFILE_INVALID: Document at ${profilePath} is invalid:`, result.reason);
           dataService.syncForUser(null);
           setCurrentUser(null);
@@ -204,9 +267,7 @@ export default function App() {
           setStatusMessage('Account profile is incomplete.');
           setAuthLoading(false);
           return;
-        }
-
-        if (result.status === 'PERMISSION_DENIED') {
+        } else if (result.status === 'PERMISSION_DENIED') {
           console.error(`[AUTH RESOLUTION] PERMISSION_DENIED: Access denied to ${profilePath} (code: ${result.code})`);
           dataService.syncForUser(null);
           setCurrentUser(null);
@@ -214,9 +275,7 @@ export default function App() {
           setStatusMessage('Account exists, but access to the gym database was denied.');
           setAuthLoading(false);
           return;
-        }
-
-        if (result.status === 'FIRESTORE_ERROR') {
+        } else if (result.status === 'FIRESTORE_ERROR') {
           console.error(`[AUTH RESOLUTION] FIRESTORE_ERROR: Network/database failure reading ${profilePath}:`, result.message);
           dataService.syncForUser(null);
           setCurrentUser(null);
@@ -227,7 +286,11 @@ export default function App() {
         }
 
         // FOUND: Valid active profile
-        const profile = result.profile;
+        const profile = activeProfile;
+        if (!profile) {
+          setAuthLoading(false);
+          return;
+        }
         console.log(`[AUTH RESOLUTION] FOUND: Successfully resolved profile for UID ${authUser.uid}:`, {
           fullName: profile.fullName,
           email: profile.email,
@@ -344,6 +407,8 @@ export default function App() {
   if (
     accountStatus === 'PROFILE_NOT_FOUND' ||
     accountStatus === 'PROFILE_INVALID' ||
+    accountStatus === 'PROFILE_DUPLICATE_EMAIL' ||
+    accountStatus === 'PROFILE_ALREADY_LINKED' ||
     accountStatus === 'PERMISSION_DENIED' ||
     accountStatus === 'FIRESTORE_ERROR'
   ) {
@@ -356,6 +421,24 @@ export default function App() {
         color: 'text-amber-400',
         bg: 'bg-amber-500/20',
         border: 'border-amber-500/30'
+      },
+      PROFILE_DUPLICATE_EMAIL: {
+        title: 'MULTIPLE PROFILES FOUND',
+        message: 'Multiple club profiles use this email. Please contact reception.',
+        description: 'More than one member or staff profile was found with this email address. Reception must merge or resolve the duplicates before you can sign in.',
+        icon: Users,
+        color: 'text-amber-400',
+        bg: 'bg-amber-500/20',
+        border: 'border-amber-500/30'
+      },
+      PROFILE_ALREADY_LINKED: {
+        title: 'ACCOUNT ALREADY LINKED',
+        message: 'This club profile is already linked to another login. Please contact reception.',
+        description: 'This club profile has already been bound to another Google login. If you need to switch accounts or re-link, please contact club reception.',
+        icon: Lock,
+        color: 'text-rose-400',
+        bg: 'bg-rose-500/20',
+        border: 'border-rose-500/30'
       },
       PROFILE_INVALID: {
         title: 'PROFILE INCOMPLETE',

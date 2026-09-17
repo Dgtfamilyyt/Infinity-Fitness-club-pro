@@ -240,7 +240,7 @@ export const StaffManagementTab: React.FC<StaffManagementTabProps> = ({
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs uppercase tracking-wider transition shadow-lg shadow-emerald-500/10 shrink-0"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Add Staff Account</span>
+            <span>Pre-register Staff</span>
           </button>
         )}
       </div>
@@ -511,8 +511,8 @@ export const StaffManagementTab: React.FC<StaffManagementTabProps> = ({
                   <UserPlus className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-base text-white uppercase tracking-wide">Provision Staff Account</h4>
-                  <p className="text-xs text-zinc-400">Authorized in Firestore profiles collection</p>
+                  <h4 className="font-bold text-base text-white uppercase tracking-wide">Pre-register Staff</h4>
+                  <p className="text-xs text-zinc-400">Login access is linked automatically when this registered email signs in for the first time.</p>
                 </div>
               </div>
               <button 
@@ -658,12 +658,12 @@ export const StaffManagementTab: React.FC<StaffManagementTabProps> = ({
                   {creating ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Creating Account...</span>
+                      <span>Saving Pre-registration...</span>
                     </>
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>Provision Account</span>
+                      <span>Save Pre-registration</span>
                     </>
                   )}
                 </button>

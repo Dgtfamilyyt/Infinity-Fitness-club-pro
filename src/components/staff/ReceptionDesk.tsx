@@ -44,6 +44,13 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
   const [payMethod, setPayMethod] = useState<PaymentRecord['paymentMethod']>('UPI');
   const [payRef, setPayRef] = useState('');
 
+  // Pre-register Member State
+  const [showPreRegisterModal, setShowPreRegisterModal] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regPlan, setRegPlan] = useState('Quarterly Transformation');
+
   const handleManualCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
@@ -102,6 +109,14 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setShowPreRegisterModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider transition"
+          >
+            <Plus className="w-4 h-4 text-emerald-400" />
+            <span>Pre-register Member</span>
+          </button>
+
           <button
             onClick={() => setShowPaymentModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider transition"
@@ -308,6 +323,112 @@ export const ReceptionDesk: React.FC<ReceptionDeskProps> = ({
                   className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold"
                 >
                   Save Payment & Renew
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pre-register Member Modal */}
+      {showPreRegisterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md rounded-2xl bg-[#121214] border border-zinc-800 p-6 text-white shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <h3 className="font-bold text-sm text-white uppercase tracking-wide">Pre-register Member</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Login access is linked automatically when this registered email signs in for the first time.</p>
+              </div>
+              <button onClick={() => setShowPreRegisterModal(false)} className="text-zinc-400 hover:text-white">✕</button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!regName.trim() || !regEmail.trim()) return;
+              dataService.addMember({
+                fullName: regName.trim(),
+                email: regEmail.trim(),
+                phone: regPhone.trim() || '+91 98000 00000',
+                planName: regPlan,
+                assignedTrainerName: 'Floor Coach',
+                fitnessGoal: 'General Fitness',
+                restrictions: 'None',
+                status: 'ACTIVE'
+              });
+              setShowPreRegisterModal(false);
+              setRegName('');
+              setRegEmail('');
+              setRegPhone('');
+            }} className="py-4 space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sameer Verma"
+                  value={regName}
+                  onChange={(e) => setRegName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                  Email Address (for Google Login) *
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. sameer.verma@gmail.com"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                  Phone Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="+91 98000 00000"
+                  value={regPhone}
+                  onChange={(e) => setRegPhone(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                  Membership Plan
+                </label>
+                <select
+                  value={regPlan}
+                  onChange={(e) => setRegPlan(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Quarterly Transformation">Quarterly Transformation (₹8,999)</option>
+                  <option value="Half-Yearly Elite">Half-Yearly Elite (₹14,999)</option>
+                  <option value="Annual Infinity Club Pass">Annual Infinity Club Pass (₹24,999)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowPreRegisterModal(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold uppercase tracking-wider text-xs"
+                >
+                  Save Pre-registration
                 </button>
               </div>
             </form>
