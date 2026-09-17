@@ -22,11 +22,17 @@ import {
   where,
   limit,
   getDocs,
+  runTransaction,
   serverTimestamp
 } from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { getStorage } from 'firebase/storage';
 import { UserProfile, UserRole } from '../types';
+import { 
+  normalizeEmail, 
+  hashEmail, 
+  PRE_REGISTRATION_LINKS_COLLECTION 
+} from '../services/preRegistrationService';
 
 // Configuration for Firebase Modular Web SDK (infinity-fitness-club-52c50)
 export const firebaseConfig = {
@@ -390,7 +396,7 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
 export const fetchUserProfile = getUserProfile;
 
 export type PreRegisterLookupResult =
-  | { status: 'FOUND'; profile: UserProfile; docId: string }
+  | { status: 'FOUND'; profile: UserProfile; docId: string; emailHash: string }
   | { status: 'NOT_FOUND' }
   | { status: 'DUPLICATE' }
   | { status: 'ALREADY_LINKED'; linkedUid: string }
@@ -399,61 +405,20 @@ export type PreRegisterLookupResult =
   | { status: 'ERROR'; message: string };
 
 /**
- * Safe Pre-registration Email Lookup (Requirement 3):
- * - normalize email using trim().toLowerCase()
- * - query profiles where email == normalized email
- * - limit(1)
- * - validate role (member, trainer, admin, owner)
- * - validate gymId
- * - return pre-registered profile
- * - never assign a role itself, never default role to member, never default gymId
- * - return null if invalid
+ * Backward-compatible helper for finding pre-registered user profile by email
+ * without querying the profiles collection directly.
  */
 export const fetchUserProfileByEmail = async (email: string): Promise<UserProfile | null> => {
   if (!email || typeof email !== 'string') return null;
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = normalizeEmail(email);
   if (!cleanEmail) return null;
 
   try {
-    const q = query(
-      collection(db, 'profiles'),
-      where('email', '==', cleanEmail),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      return null;
+    const lookup = await lookupPreRegisteredProfile(cleanEmail, '');
+    if (lookup.status === 'FOUND') {
+      return lookup.profile;
     }
-
-    const docSnap = snap.docs[0];
-    const data = docSnap.data();
-
-    // Validate role
-    const role = data.role as UserRole;
-    if (!role || !VALID_ROLES.includes(role)) {
-      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} has invalid role:`, data.role);
-      return null;
-    }
-
-    // Validate gymId
-    const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
-    if (!gymId) {
-      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} is missing gymId`);
-      return null;
-    }
-
-    // Never default role, never default gymId
-    const profile: UserProfile = {
-      ...data,
-      id: docSnap.id,
-      email: cleanEmail,
-      role,
-      gymId,
-      fullName: typeof data.fullName === 'string' ? data.fullName.trim() : '',
-      isActive: typeof data.isActive === 'boolean' ? data.isActive : true
-    } as UserProfile;
-
-    return profile;
+    return null;
   } catch (err) {
     console.warn(`[FIREBASE AUTH] fetchUserProfileByEmail error for ${cleanEmail}:`, err);
     return null;
@@ -461,10 +426,12 @@ export const fetchUserProfileByEmail = async (email: string): Promise<UserProfil
 };
 
 /**
- * Granular Pre-Registration Lookup with Duplicate & Link Verification (Requirements 3, 6, 8)
- * - Queries profiles with limit(2) to safely detect duplicate accounts
- * - Checks if profile is already linked to another authUid
- * - Strictly validates required fields (fullName, email, role, gymId, isActive)
+ * Secure Pre-Registration Lookup using Dedicated Minimal Lookup Collection (Step 3)
+ * - Hashes normalized email to deterministic SHA-256 key
+ * - Directly reads pre_registration_links/{emailHash} (NO collection queries against profiles)
+ * - Validates link metadata (emailNormalized, profileDocId, gymId, role, isActive)
+ * - Verifies already-linked status against current authenticated UID
+ * - Fetches profiles/{profileDocId} and validates against link document
  */
 export const lookupPreRegisteredProfile = async (
   email: string,
@@ -472,99 +439,140 @@ export const lookupPreRegisteredProfile = async (
   fallbackProfiles: UserProfile[] = []
 ): Promise<PreRegisterLookupResult> => {
   if (!email || typeof email !== 'string') return { status: 'NOT_FOUND' };
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = normalizeEmail(email);
   if (!cleanEmail) return { status: 'NOT_FOUND' };
 
-  console.log(`[FIREBASE AUTH] Querying pre-registered profile for email: ${cleanEmail}`);
+  console.log(`[FIREBASE AUTH] Looking up pre-registration link for normalized email: ${cleanEmail}`);
 
   try {
-    // Query with limit(2) to safely detect duplicate email profiles (Requirement 6)
-    const q = query(
-      collection(db, 'profiles'),
-      where('email', '==', cleanEmail),
-      limit(2)
-    );
-    const snap = await getDocs(q);
+    const emailHash = await hashEmail(cleanEmail);
+    const linkRef = doc(db, PRE_REGISTRATION_LINKS_COLLECTION, emailHash);
+    const linkSnap = await getDoc(linkRef);
 
-    if (snap.empty) {
-      console.log(`[FIREBASE AUTH] No profile doc found via query for email: ${cleanEmail}. Checking local cache...`);
-      // Check fallbackProfiles if Firestore collection query returns empty
-      const localMatches = fallbackProfiles.filter(p => p.email && p.email.trim().toLowerCase() === cleanEmail);
-      if (localMatches.length > 1) {
-        return { status: 'DUPLICATE' };
-      }
-      if (localMatches.length === 1) {
-        const local = localMatches[0];
-        if (local.authLinked === true && local.authUid && local.authUid !== currentAuthUid) {
-          return { status: 'ALREADY_LINKED', linkedUid: local.authUid };
+    if (!linkSnap.exists()) {
+      console.log(`[FIREBASE AUTH] No pre-registration link found at ${PRE_REGISTRATION_LINKS_COLLECTION}/${emailHash}`);
+
+      // Fallback only for local development/in-memory profiles
+      if (fallbackProfiles && fallbackProfiles.length > 0) {
+        const localMatches = fallbackProfiles.filter(p => p.email && normalizeEmail(p.email) === cleanEmail);
+        if (localMatches.length > 1) {
+          return { status: 'DUPLICATE' };
         }
-        return {
-          status: 'FOUND',
-          profile: local,
-          docId: local.id
-        };
+        if (localMatches.length === 1) {
+          const local = localMatches[0];
+          if (local.authLinked === true && local.authUid && local.authUid !== currentAuthUid) {
+            return { status: 'ALREADY_LINKED', linkedUid: local.authUid };
+          }
+          return {
+            status: 'FOUND',
+            profile: local,
+            docId: local.id,
+            emailHash
+          };
+        }
       }
+
       return { status: 'NOT_FOUND' };
     }
 
-    // Requirement 6: If more than one pre-registration profile has the same normalized email:
-    // Do NOT auto-link. Return a safe error status: PROFILE_DUPLICATE_EMAIL
-    if (snap.docs.length > 1) {
-      console.warn(`[FIREBASE AUTH] Multiple profiles found with email: ${cleanEmail}`);
-      return { status: 'DUPLICATE' };
+    const linkData = linkSnap.data();
+
+    // 1. Validate link document fields
+    if (linkData.emailNormalized !== cleanEmail) {
+      console.warn(`[FIREBASE AUTH] Pre-registration link email mismatch: stored=${linkData.emailNormalized}, query=${cleanEmail}`);
+      return { status: 'INVALID', reason: 'Pre-registration link email mismatch.' };
     }
 
-    const docSnap = snap.docs[0];
-    const data = docSnap.data();
-
-    // Requirement 8: If pre-registered profile has:
-    // authLinked === true AND authUid exists AND authUid !== authUser.uid
-    // then stop and return: PROFILE_ALREADY_LINKED
-    if (data.authLinked === true && data.authUid && data.authUid !== currentAuthUid) {
-      console.warn(`[FIREBASE AUTH] Profile for ${cleanEmail} is already linked to another UID:`, data.authUid);
-      return { status: 'ALREADY_LINKED', linkedUid: data.authUid };
+    if (!linkData.profileDocId || typeof linkData.profileDocId !== 'string') {
+      return { status: 'INVALID', reason: 'Pre-registration link missing profileDocId.' };
     }
 
-    // Strict validation: require fullName, valid role, gymId, isActive
-    const invalidReasons: string[] = [];
-
-    const fullName = typeof data.fullName === 'string' && data.fullName.trim() ? data.fullName.trim() : '';
-    if (!fullName) invalidReasons.push('missing or empty fullName');
-
-    const role = data.role as UserRole;
-    if (!role || !VALID_ROLES.includes(role)) {
-      invalidReasons.push(`invalid role "${data.role}" (must be member, trainer, admin, or owner)`);
+    if (!linkData.gymId || typeof linkData.gymId !== 'string') {
+      return { status: 'INVALID', reason: 'Pre-registration link missing gymId.' };
     }
 
-    const gymId = typeof data.gymId === 'string' ? data.gymId.trim() : '';
-    if (!gymId) {
-      invalidReasons.push('missing or empty gymId');
+    const linkRole = linkData.role as UserRole;
+    if (!linkRole || !VALID_ROLES.includes(linkRole)) {
+      return { status: 'INVALID', reason: `Pre-registration link has invalid role: ${linkData.role}` };
     }
 
-    if (typeof data.isActive !== 'boolean') {
-      invalidReasons.push('missing or invalid isActive flag (must be boolean)');
+    if (linkData.isActive === false) {
+      return { status: 'INVALID', reason: 'Account pre-registration is inactive or suspended.' };
     }
 
-    if (invalidReasons.length > 0) {
-      const reason = `Pre-registered profile has invalid data: ${invalidReasons.join(', ')}`;
-      console.warn(`[FIREBASE AUTH] Pre-registered profile for ${cleanEmail} is invalid:`, reason);
-      return { status: 'INVALID', reason };
+    // 2. Already linked check (Requirement 5)
+    if (linkData.authLinked === true && linkData.authUid && linkData.authUid !== currentAuthUid) {
+      console.warn(`[FIREBASE AUTH] Pre-registration for ${cleanEmail} is already linked to another UID: ${linkData.authUid}`);
+      return { status: 'ALREADY_LINKED', linkedUid: linkData.authUid };
     }
 
-    const validProfile: UserProfile = {
-      ...data,
-      id: docSnap.id,
-      fullName,
+    // If already linked to current UID, load the canonical profile directly
+    if (linkData.authLinked === true && linkData.authUid === currentAuthUid) {
+      const canonRef = doc(db, 'profiles', currentAuthUid);
+      const canonSnap = await getDoc(canonRef);
+      if (canonSnap.exists()) {
+        const cData = canonSnap.data() as UserProfile;
+        return {
+          status: 'FOUND',
+          profile: {
+            ...cData,
+            id: currentAuthUid,
+            uid: currentAuthUid
+          },
+          docId: currentAuthUid,
+          emailHash
+        };
+      }
+    }
+
+    // 3. Fetch pre-registration profile document: profiles/{profileDocId}
+    const profileRef = doc(db, 'profiles', linkData.profileDocId);
+    const profileSnap = await getDoc(profileRef);
+
+    if (!profileSnap.exists()) {
+      console.warn(`[FIREBASE AUTH] Profile doc ${linkData.profileDocId} referenced by link does not exist.`);
+      return { status: 'NOT_FOUND' };
+    }
+
+    const profileData = profileSnap.data();
+
+    // 4. Validate profile against link metadata (Requirement 4)
+    const profileEmailNorm = normalizeEmail(profileData.email || '');
+    if (profileEmailNorm !== cleanEmail) {
+      return { status: 'INVALID', reason: 'Profile document email does not match verified authenticated email.' };
+    }
+
+    if (profileData.role !== linkRole) {
+      return { status: 'INVALID', reason: 'Profile document role does not match pre-registration link role.' };
+    }
+
+    if (profileData.gymId && linkData.gymId && profileData.gymId !== linkData.gymId) {
+      return { status: 'INVALID', reason: 'Profile document gymId does not match link gymId.' };
+    }
+
+    if (typeof profileData.isActive !== 'boolean') {
+      return { status: 'INVALID', reason: 'Profile document isActive must be a boolean.' };
+    }
+
+    if (profileData.authLinked === true && profileData.authUid && profileData.authUid !== currentAuthUid) {
+      return { status: 'ALREADY_LINKED', linkedUid: profileData.authUid };
+    }
+
+    const validatedProfile: UserProfile = {
+      ...profileData,
+      id: profileSnap.id,
+      fullName: typeof profileData.fullName === 'string' ? profileData.fullName.trim() : '',
       email: cleanEmail,
-      role,
-      gymId,
-      isActive: data.isActive
+      role: linkRole,
+      gymId: linkData.gymId,
+      isActive: profileData.isActive
     } as UserProfile;
 
     return {
       status: 'FOUND',
-      profile: validProfile,
-      docId: docSnap.id
+      profile: validatedProfile,
+      docId: linkData.profileDocId,
+      emailHash
     };
   } catch (err: any) {
     const code = err?.code || 'unknown';
@@ -577,21 +585,6 @@ export const lookupPreRegisteredProfile = async (
       message.includes('permission-denied') ||
       message.includes('Missing or insufficient permissions')
     ) {
-      const localMatches = fallbackProfiles.filter(p => p.email && p.email.trim().toLowerCase() === cleanEmail);
-      if (localMatches.length > 1) {
-        return { status: 'DUPLICATE' };
-      }
-      if (localMatches.length === 1) {
-        const local = localMatches[0];
-        if (local.authLinked === true && local.authUid && local.authUid !== currentAuthUid) {
-          return { status: 'ALREADY_LINKED', linkedUid: local.authUid };
-        }
-        return {
-          status: 'FOUND',
-          profile: local,
-          docId: local.id
-        };
-      }
       return { status: 'PERMISSION_DENIED', code };
     }
 
@@ -600,53 +593,101 @@ export const lookupPreRegisteredProfile = async (
 };
 
 /**
- * Pre-registration UID Linking (Requirements 4, 7, 8)
- * - Writes canonical profile document at profiles/{authUser.uid}
- * - Preserves all fields (role, gymId, membership, memberId, qrToken, etc.)
- * - Sets id: authUser.uid, uid: authUser.uid, authUid: authUser.uid, authLinked: true
- * - Updates old pre-registration document with authUid and authLinked (does NOT delete)
+ * Pre-registration UID Linking via Firestore Atomic Transaction (Requirement 6)
+ * Within the transaction:
+ * 1. Re-read: pre_registration_links/{emailHash}
+ * 2. Confirm it is still unlinked OR linked to the same UID.
+ * 3. Read: profiles/{profileDocId}
+ * 4. Confirm: email matches authenticated email, role/gymId unchanged, not linked to another UID
+ * 5. Create canonical: profiles/{authUid}
+ * 6. Update original pre-registration profile: profiles/{profileDocId}
+ * 7. Update: pre_registration_links/{emailHash}
  */
 export const linkPreRegisteredProfile = async (
-  oldDocId: string,
+  profileDocId: string,
   authUser: AppAuthUser,
-  preRegisteredProfile: UserProfile
+  preRegisteredProfile: UserProfile,
+  providedEmailHash?: string
 ): Promise<UserProfile> => {
-  const normalizedEmail = (authUser.email || preRegisteredProfile.email).toLowerCase().trim();
+  const normalizedEmail = normalizeEmail(authUser.email || preRegisteredProfile.email);
+  const emailHash = providedEmailHash || await hashEmail(normalizedEmail);
 
-  const canonicalProfile: UserProfile = {
-    ...preRegisteredProfile,
-    id: authUser.uid,
-    uid: authUser.uid,
-    authUid: authUser.uid,
-    authLinked: true,
-    email: normalizedEmail
-  };
+  const linkRef = doc(db, PRE_REGISTRATION_LINKS_COLLECTION, emailHash);
+  const origProfileRef = doc(db, 'profiles', profileDocId);
+  const canonicalProfileRef = doc(db, 'profiles', authUser.uid);
 
-  // 1. Create/save canonical profile at profiles/{authUser.uid}
-  const canonicalRef = doc(db, 'profiles', authUser.uid);
-  await setDoc(canonicalRef, {
-    ...canonicalProfile,
-    updatedAt: serverTimestamp()
-  }, { merge: true });
+  let canonicalProfile: UserProfile | null = null;
 
-  console.log(`[FIREBASE AUTH] Created canonical profile at profiles/${authUser.uid} for ${normalizedEmail} with role "${canonicalProfile.role}"`);
+  await runTransaction(db, async (transaction) => {
+    // 1. Re-read pre_registration_links/{emailHash}
+    const linkDoc = await transaction.get(linkRef);
+    if (!linkDoc.exists()) {
+      throw new Error('Pre-registration link record does not exist.');
+    }
+    const linkData = linkDoc.data();
 
-  // 2. Requirement 7: If oldDocId is different from authUser.uid, update the old document
-  if (oldDocId && oldDocId !== authUser.uid) {
-    try {
-      const oldRef = doc(db, 'profiles', oldDocId);
-      await updateDoc(oldRef, {
+    // 2. Confirm it is still unlinked OR linked to the same UID
+    if (linkData.authLinked === true && linkData.authUid && linkData.authUid !== authUser.uid) {
+      throw new Error(`PROFILE_ALREADY_LINKED:${linkData.authUid}`);
+    }
+
+    // 3. Read profiles/{profileDocId}
+    const origDoc = await transaction.get(origProfileRef);
+    if (!origDoc.exists()) {
+      throw new Error('Original pre-registration profile does not exist.');
+    }
+    const origData = origDoc.data() as UserProfile;
+
+    // 4. Confirm email matches, role/gymId unchanged, not linked to another UID
+    const origEmailNorm = normalizeEmail(origData.email || '');
+    if (origEmailNorm !== normalizedEmail) {
+      throw new Error('Profile email does not match authenticated email.');
+    }
+    if (origData.role !== linkData.role) {
+      throw new Error('Profile role does not match link role.');
+    }
+    if (origData.gymId && linkData.gymId && origData.gymId !== linkData.gymId) {
+      throw new Error('Profile gymId does not match link gymId.');
+    }
+    if (origData.authLinked === true && origData.authUid && origData.authUid !== authUser.uid) {
+      throw new Error(`PROFILE_ALREADY_LINKED:${origData.authUid}`);
+    }
+
+    // 5. Create canonical profiles/{authUid}
+    canonicalProfile = {
+      ...origData,
+      id: authUser.uid,
+      uid: authUser.uid,
+      authUid: authUser.uid,
+      authLinked: true,
+      email: normalizedEmail,
+      preRegistrationDocId: profileDocId
+    };
+
+    transaction.set(canonicalProfileRef, {
+      ...canonicalProfile,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+
+    // 6. Update original pre-registration profile
+    if (profileDocId !== authUser.uid) {
+      transaction.update(origProfileRef, {
         authUid: authUser.uid,
         authLinked: true,
         updatedAt: serverTimestamp()
       });
-      console.log(`[FIREBASE AUTH] Updated pre-registration doc profiles/${oldDocId} with authUid=${authUser.uid} and authLinked=true`);
-    } catch (oldErr) {
-      console.warn(`[FIREBASE AUTH] Notice: could not update old pre-registration doc ${oldDocId}:`, oldErr);
     }
-  }
 
-  return canonicalProfile;
+    // 7. Update pre_registration_links/{emailHash}
+    transaction.update(linkRef, {
+      authUid: authUser.uid,
+      authLinked: true,
+      updatedAt: serverTimestamp()
+    });
+  });
+
+  console.log(`[FIREBASE AUTH] Successfully bound pre-registration ${profileDocId} to auth UID ${authUser.uid} via atomic transaction`);
+  return canonicalProfile!;
 };
 
 export const saveUserProfile = async (profile: UserProfile): Promise<void> => {

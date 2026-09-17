@@ -36,7 +36,21 @@ export interface UserProfile {
   trainerNotes?: string;
   attendanceStreak?: number;
   workoutStreak?: number;
+  preRegistrationDocId?: string;
   createdAt?: string;
+}
+
+export interface PreRegistrationLink {
+  emailHash: string;
+  emailNormalized: string;
+  profileDocId: string;
+  gymId: string;
+  role: UserRole;
+  authUid?: string | null;
+  authLinked: boolean;
+  isActive: boolean;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface GymZone {

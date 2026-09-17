@@ -17,6 +17,7 @@ import { INITIAL_TRAINERS, INITIAL_STAFF } from './seedData';
 import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
+import { normalizeEmail, hashEmail, PRE_REGISTRATION_LINKS_COLLECTION } from './preRegistrationService';
 
 const PROFILES_COLLECTION = 'profiles';
 
@@ -107,8 +108,21 @@ export const staffService = {
     },
     creatorName: string
   ): Promise<UserProfile> {
+    const cleanEmail = normalizeEmail(data.email);
+    if (!cleanEmail) {
+      throw new Error('Valid email address is required.');
+    }
+
+    const emailHash = await hashEmail(cleanEmail);
+    const linkRef = doc(db, PRE_REGISTRATION_LINKS_COLLECTION, emailHash);
+
+    // Check if this email is already pre-registered
+    const existingLink = await getDoc(linkRef);
+    if (existingLink.exists()) {
+      throw new Error('This email is already pre-registered.');
+    }
+
     const rawId = `staff_${data.role}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const cleanEmail = data.email.toLowerCase().trim();
 
     const newStaffProfile: UserProfile = {
       id: rawId,
@@ -136,6 +150,7 @@ export const staffService = {
     };
 
     try {
+      // 1. Save profile document
       await setDoc(doc(db, PROFILES_COLLECTION, rawId), {
         ...newStaffProfile,
         gymId: DEFAULT_GYM_ID,
@@ -143,6 +158,21 @@ export const staffService = {
         updatedAt: serverTimestamp()
       });
 
+      // 2. Save pre-registration link record
+      await setDoc(linkRef, {
+        emailHash,
+        emailNormalized: cleanEmail,
+        profileDocId: rawId,
+        gymId: DEFAULT_GYM_ID,
+        role: data.role,
+        authUid: null,
+        authLinked: false,
+        isActive: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // 3. Audit log
       await auditService.logAuditEvent(
         creatorName,
         'STAFF_CREATED',

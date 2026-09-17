@@ -7,7 +7,6 @@ import { generateCryptographicQrToken } from './services/qrService';
 import { 
   getUserProfile,
   fetchUserProfile, 
-  fetchUserProfileByEmail,
   lookupPreRegisteredProfile,
   linkPreRegisteredProfile,
   saveUserProfile, 
@@ -234,16 +233,28 @@ export default function App() {
             if (lookup.status === 'FOUND') {
               console.log(`[AUTH RESOLUTION] Valid pre-registration found for ${userEmail} (${lookup.profile.role}). Linking to UID: ${authUser.uid}`);
               try {
-                const canonical = await linkPreRegisteredProfile(lookup.docId, authUser, lookup.profile);
+                const canonical = await linkPreRegisteredProfile(lookup.docId, authUser, lookup.profile, lookup.emailHash);
                 dataService.upsertProfile(canonical);
                 activeProfile = canonical;
                 setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'FOUND' } : null);
               } catch (linkErr: any) {
                 console.error(`[AUTH RESOLUTION] Failed to link pre-registered profile:`, linkErr);
+                const errMsg = linkErr?.message || '';
                 dataService.syncForUser(null);
                 setCurrentUser(null);
-                setAccountStatus('FIRESTORE_ERROR');
-                setStatusMessage('Unable to link pre-registered profile to your login credentials.');
+                if (errMsg.includes('PROFILE_ALREADY_LINKED')) {
+                  setAccountStatus('PROFILE_ALREADY_LINKED');
+                  setStatusMessage('This club profile is already linked to another login. Please contact reception.');
+                  setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'PROFILE_ALREADY_LINKED' } : null);
+                } else if (errMsg.includes('PROFILE_DUPLICATE_EMAIL')) {
+                  setAccountStatus('PROFILE_DUPLICATE_EMAIL');
+                  setStatusMessage('Multiple club profiles use this email. Please contact reception.');
+                  setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'PROFILE_DUPLICATE_EMAIL' } : null);
+                } else {
+                  setAccountStatus('FIRESTORE_ERROR');
+                  setStatusMessage('Unable to link pre-registered profile to your login credentials.');
+                  setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'FIRESTORE_ERROR', errorMessage: errMsg } : null);
+                }
                 setAuthLoading(false);
                 return;
               }

@@ -2,6 +2,7 @@ import {
   collection, 
   doc, 
   getDocs, 
+  getDoc,
   setDoc, 
   updateDoc, 
   onSnapshot, 
@@ -17,6 +18,7 @@ import { isDevDemoEnabled } from './devMode';
 import { auditService } from './auditService';
 import { DEFAULT_GYM_ID } from './gymSettingsService';
 import { generateCryptographicQrToken, hashQrToken } from './qrService';
+import { normalizeEmail, hashEmail, PRE_REGISTRATION_LINKS_COLLECTION } from './preRegistrationService';
 
 const PROFILES_COLLECTION = 'profiles';
 const QR_TOKENS_COLLECTION = 'qr_tokens';
@@ -74,6 +76,20 @@ export const memberService = {
     },
     staffName: string
   ): Promise<UserProfile> {
+    const cleanEmail = normalizeEmail(data.email);
+    if (!cleanEmail) {
+      throw new Error('Valid email is required.');
+    }
+
+    const emailHash = await hashEmail(cleanEmail);
+    const linkRef = doc(db, PRE_REGISTRATION_LINKS_COLLECTION, emailHash);
+
+    // Check if this email is already pre-registered
+    const existingLink = await getDoc(linkRef);
+    if (existingLink.exists()) {
+      throw new Error('This email is already pre-registered.');
+    }
+
     const rawId = `athlete_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const memberId = `IFC-${Math.floor(1000 + Math.random() * 9000)}`;
     const rawQrToken = generateCryptographicQrToken();
@@ -84,7 +100,7 @@ export const memberService = {
       uid: rawId,
       memberId,
       fullName: data.fullName.trim(),
-      email: data.email.toLowerCase().trim(),
+      email: cleanEmail,
       phone: data.phone.trim(),
       role: 'member',
       status: 'ACTIVE',
@@ -134,7 +150,21 @@ export const memberService = {
         updatedAt: serverTimestamp()
       });
 
-      // 4. Audit Log
+      // 4. Save Pre-registration link record
+      await setDoc(linkRef, {
+        emailHash,
+        emailNormalized: cleanEmail,
+        profileDocId: rawId,
+        gymId: DEFAULT_GYM_ID,
+        role: 'member',
+        authUid: null,
+        authLinked: false,
+        isActive: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // 5. Audit Log
       await auditService.logAuditEvent(
         staffName,
         'MEMBER_CREATED',

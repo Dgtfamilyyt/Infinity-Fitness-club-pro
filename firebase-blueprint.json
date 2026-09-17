@@ -172,6 +172,24 @@
         "details": { "type": "string" }
       },
       "required": ["actor", "action", "timestamp"]
+    },
+    "pre_registration_links": {
+      "title": "Pre-Registration Links",
+      "description": "Minimal lookup records for pre-registered member and staff onboarding",
+      "type": "object",
+      "properties": {
+        "emailHash": { "type": "string" },
+        "emailNormalized": { "type": "string" },
+        "profileDocId": { "type": "string" },
+        "gymId": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "trainer", "admin", "owner"] },
+        "authUid": { "type": "string" },
+        "authLinked": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["emailHash", "emailNormalized", "profileDocId", "gymId", "role"]
     }
   }
 }

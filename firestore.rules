@@ -141,7 +141,15 @@ service cloud.firestore {
       allow create: if isBootstrap() || (signedIn() && (
         isAdminOrOwner() || 
         isStaff() || 
-        (myUid() == userId && request.resource.data.role == 'member')
+        (myUid() == userId && (
+          request.resource.data.role == 'member' ||
+          // Linking pre-registration doc where user's email matches
+          (
+            'email' in request.resource.data &&
+            request.auth.token.email != null &&
+            (request.resource.data.email == request.auth.token.email || request.resource.data.email == request.auth.token.email.lower())
+          )
+        ))
       ));
 
       allow update: if isBootstrap() || (signedIn() && (
@@ -152,7 +160,16 @@ service cloud.firestore {
             'membershipPlanId', 'planName', 'membershipStart', 'membershipExpiry', 
             'assignedTrainerId', 'gymId'
           ])
-        ))
+        )) ||
+        // Linking pre-registration doc where user's email matches
+        (
+          request.auth.token.email != null &&
+          (resource.data.email == request.auth.token.email || resource.data.email == request.auth.token.email.lower()) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['authUid', 'authLinked', 'updatedAt']) &&
+          request.resource.data.authUid == request.auth.uid &&
+          request.resource.data.authLinked == true &&
+          (!('authLinked' in resource.data) || resource.data.authLinked != true)
+        )
       ));
 
       allow delete: if isAdminOrOwner();
@@ -286,7 +303,37 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // 15. DEFAULT DENY CATCH-ALL
+    // 15. PRE-REGISTRATION LINKS (Minimal Lookup)
+    // ==========================================
+    match /pre_registration_links/{emailHash} {
+      // Authenticated user can read ONLY their own pre-registration link
+      // Staff or bootstrap can also read
+      allow read: if isBootstrap() || isStaff() || (
+        signedIn() && 
+        resource != null && 
+        request.auth.token.email != null &&
+        (resource.data.emailNormalized == request.auth.token.email || resource.data.emailNormalized == request.auth.token.email.lower())
+      );
+
+      // Staff or bootstrap can create pre-registration links
+      allow create: if isBootstrap() || isStaff();
+
+      // Authenticated user can link their own UID, or staff can update
+      allow update: if isBootstrap() || isStaff() || (
+        signedIn() &&
+        request.auth.token.email != null &&
+        (resource.data.emailNormalized == request.auth.token.email || resource.data.emailNormalized == request.auth.token.email.lower()) &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.authLinked == true &&
+        (!('authLinked' in resource.data) || resource.data.authLinked != true) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['authUid', 'authLinked', 'updatedAt'])
+      );
+
+      allow delete: if isAdminOrOwner();
+    }
+
+    // ==========================================
+    // 16. DEFAULT DENY CATCH-ALL
     // ==========================================
     match /{document=**} {
       allow read, write: if false;
