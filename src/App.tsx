@@ -96,15 +96,8 @@ export default function App() {
   const [authDiagnostics, setAuthDiagnostics] = useState<AuthDiagnosticData | null>(null);
   const [denialMessage, setDenialMessage] = useState<string>('');
 
-  // Requirement 2: Development & debug diagnostics mode detection
-  const isDevOrDebug = 
-    import.meta.env.DEV || 
-    (typeof window !== 'undefined' && (
-      window.location.hostname === 'localhost' ||
-      window.location.hostname.includes('run.app') ||
-      window.location.search.includes('debug') ||
-      window.location.hash.includes('debug')
-    ));
+  // Requirement 2: Development & debug diagnostics mode detection (Dev only, disabled in production)
+  const isDevOrDebug = Boolean(import.meta.env.DEV);
 
   // Initial Route Check from URL pathname or hash
   useEffect(() => {
@@ -166,16 +159,17 @@ export default function App() {
         return;
       }
 
-      // Requirement 4: After Google login log auth.currentUser.uid, then read exactly profiles/{auth.currentUser.uid}
-      console.log(`[AUTH DEBUG] auth.currentUser.uid: ${authUser.uid}`);
       const profilePath = `profiles/${authUser.uid}`;
-      console.log(`[AUTH DEBUG] Reading exactly: ${profilePath}`);
+      if (import.meta.env.DEV) {
+        console.log(`[AUTH DEBUG] auth.currentUser.uid: ${authUser.uid}`);
+        console.log(`[AUTH DEBUG] Reading exactly: ${profilePath}`);
+      }
 
       try {
         // Requirement 1 & 7: Distinct profile resolution and validation
         const result: ProfileResolutionResult = await getUserProfile(authUser.uid);
 
-        // Record diagnostics for Requirement 2
+        // Record diagnostics for Requirement 2 (inspected only by dev diagnostics UI)
         setAuthDiagnostics({
           uid: authUser.uid,
           email: authUser.email || '',
@@ -193,12 +187,18 @@ export default function App() {
           // Pre-registration Linking Workflow (Requirements 4, 5, 6, 7, 8)
           const userEmail = authUser.email?.trim().toLowerCase();
           if (userEmail) {
-            console.log(`[AUTH RESOLUTION] Querying pre-registered profile for email: ${userEmail}`);
+            if (import.meta.env.DEV) {
+              console.log(`[AUTH RESOLUTION] Querying pre-registered profile for email: ${userEmail}`);
+            }
             const localProfiles = dataService.getAllProfiles();
             const lookup = await lookupPreRegisteredProfile(userEmail, authUser.uid, localProfiles);
 
             if (lookup.status === 'DUPLICATE') {
-              console.warn(`[AUTH RESOLUTION] DUPLICATE email detected for ${userEmail}`);
+              if (import.meta.env.DEV) {
+                console.warn(`[AUTH RESOLUTION] DUPLICATE email detected for ${userEmail}`);
+              } else {
+                console.warn('[AUTH RESOLUTION] Duplicate email detected during profile resolution');
+              }
               dataService.syncForUser(null);
               setCurrentUser(null);
               setAccountStatus('PROFILE_DUPLICATE_EMAIL');
@@ -209,7 +209,11 @@ export default function App() {
             }
 
             if (lookup.status === 'ALREADY_LINKED') {
-              console.warn(`[AUTH RESOLUTION] Profile for ${userEmail} is already linked to another login (${lookup.linkedUid})`);
+              if (import.meta.env.DEV) {
+                console.warn(`[AUTH RESOLUTION] Profile for ${userEmail} is already linked to another login (${lookup.linkedUid})`);
+              } else {
+                console.warn('[AUTH RESOLUTION] Profile is already linked to another login');
+              }
               dataService.syncForUser(null);
               setCurrentUser(null);
               setAccountStatus('PROFILE_ALREADY_LINKED');
@@ -220,7 +224,11 @@ export default function App() {
             }
 
             if (lookup.status === 'INVALID') {
-              console.warn(`[AUTH RESOLUTION] Pre-registered profile for ${userEmail} is invalid:`, lookup.reason);
+              if (import.meta.env.DEV) {
+                console.warn(`[AUTH RESOLUTION] Pre-registered profile for ${userEmail} is invalid:`, lookup.reason);
+              } else {
+                console.warn('[AUTH RESOLUTION] Pre-registered profile is invalid');
+              }
               dataService.syncForUser(null);
               setCurrentUser(null);
               setAccountStatus('PROFILE_INVALID');
@@ -231,14 +239,20 @@ export default function App() {
             }
 
             if (lookup.status === 'FOUND') {
-              console.log(`[AUTH RESOLUTION] Valid pre-registration found for ${userEmail} (${lookup.profile.role}). Linking to UID: ${authUser.uid}`);
+              if (import.meta.env.DEV) {
+                console.log(`[AUTH RESOLUTION] Valid pre-registration found for ${userEmail} (${lookup.profile.role}). Linking to UID: ${authUser.uid}`);
+              }
               try {
                 const canonical = await linkPreRegisteredProfile(lookup.docId, authUser, lookup.profile, lookup.emailHash);
                 dataService.upsertProfile(canonical);
                 activeProfile = canonical;
                 setAuthDiagnostics(prev => prev ? { ...prev, resultStatus: 'FOUND' } : null);
               } catch (linkErr: any) {
-                console.error(`[AUTH RESOLUTION] Failed to link pre-registered profile:`, linkErr);
+                if (import.meta.env.DEV) {
+                  console.error(`[AUTH RESOLUTION] Failed to link pre-registered profile:`, linkErr);
+                } else {
+                  console.error('[AUTH RESOLUTION] Failed to link pre-registered profile');
+                }
                 const errMsg = linkErr?.message || '';
                 dataService.syncForUser(null);
                 setCurrentUser(null);
@@ -262,7 +276,11 @@ export default function App() {
           }
 
           if (!activeProfile) {
-            console.warn(`[AUTH RESOLUTION] NOT_FOUND: Profile document does not exist at ${profilePath} and no pre-registered email match`);
+            if (import.meta.env.DEV) {
+              console.warn(`[AUTH RESOLUTION] NOT_FOUND: Profile document does not exist at ${profilePath} and no pre-registered email match`);
+            } else {
+              console.warn('[AUTH RESOLUTION] Profile document not found');
+            }
             dataService.syncForUser(null);
             setCurrentUser(null);
             setAccountStatus('PROFILE_NOT_FOUND');
@@ -271,7 +289,11 @@ export default function App() {
             return;
           }
         } else if (result.status === 'PROFILE_INVALID') {
-          console.warn(`[AUTH RESOLUTION] PROFILE_INVALID: Document at ${profilePath} is invalid:`, result.reason);
+          if (import.meta.env.DEV) {
+            console.warn(`[AUTH RESOLUTION] PROFILE_INVALID: Document at ${profilePath} is invalid:`, result.reason);
+          } else {
+            console.warn('[AUTH RESOLUTION] Profile document is invalid');
+          }
           dataService.syncForUser(null);
           setCurrentUser(null);
           setAccountStatus('PROFILE_INVALID');
@@ -279,7 +301,11 @@ export default function App() {
           setAuthLoading(false);
           return;
         } else if (result.status === 'PERMISSION_DENIED') {
-          console.error(`[AUTH RESOLUTION] PERMISSION_DENIED: Access denied to ${profilePath} (code: ${result.code})`);
+          if (import.meta.env.DEV) {
+            console.error(`[AUTH RESOLUTION] PERMISSION_DENIED: Access denied to ${profilePath} (code: ${result.code})`);
+          } else {
+            console.error('[AUTH RESOLUTION] Permission denied accessing profile');
+          }
           dataService.syncForUser(null);
           setCurrentUser(null);
           setAccountStatus('PERMISSION_DENIED');
@@ -287,7 +313,11 @@ export default function App() {
           setAuthLoading(false);
           return;
         } else if (result.status === 'FIRESTORE_ERROR') {
-          console.error(`[AUTH RESOLUTION] FIRESTORE_ERROR: Network/database failure reading ${profilePath}:`, result.message);
+          if (import.meta.env.DEV) {
+            console.error(`[AUTH RESOLUTION] FIRESTORE_ERROR: Network/database failure reading ${profilePath}:`, result.message);
+          } else {
+            console.error('[AUTH RESOLUTION] Database error resolving profile');
+          }
           dataService.syncForUser(null);
           setCurrentUser(null);
           setAccountStatus('FIRESTORE_ERROR');
@@ -302,13 +332,15 @@ export default function App() {
           setAuthLoading(false);
           return;
         }
-        console.log(`[AUTH RESOLUTION] FOUND: Successfully resolved profile for UID ${authUser.uid}:`, {
-          fullName: profile.fullName,
-          email: profile.email,
-          role: profile.role,
-          gymId: profile.gymId,
-          isActive: profile.isActive
-        });
+        if (import.meta.env.DEV) {
+          console.log(`[AUTH RESOLUTION] FOUND: Successfully resolved profile for UID ${authUser.uid}:`, {
+            fullName: profile.fullName,
+            email: profile.email,
+            role: profile.role,
+            gymId: profile.gymId,
+            isActive: profile.isActive
+          });
+        }
 
         // Check if profile is inactive or suspended
         if (profile.isActive === false) {

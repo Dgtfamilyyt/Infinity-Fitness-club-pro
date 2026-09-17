@@ -45,8 +45,8 @@ export const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-V01RT496K8"
 };
 
-// Log active Firebase config on startup (never log secrets or tokens)
-if (typeof window !== 'undefined') {
+// Log active Firebase config on startup (dev only, never log secrets or tokens)
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   console.log("[FIREBASE DEBUG]", {
     projectId: firebaseConfig.projectId,
     authDomain: firebaseConfig.authDomain,
@@ -287,19 +287,25 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
   if (!uid) return { status: 'NOT_FOUND' };
 
   const profilePath = `profiles/${uid}`;
-  console.log(`[FIREBASE AUTH] Reading profile document at: ${profilePath}`);
+  if (import.meta.env.DEV) {
+    console.log(`[FIREBASE AUTH] Reading profile document at: ${profilePath}`);
+  }
 
   try {
     const ref = doc(db, 'profiles', uid);
     const snap = await getDoc(ref);
 
     if (!snap.exists()) {
-      console.log(`[FIREBASE AUTH] Result for ${profilePath}: NOT_FOUND`);
+      if (import.meta.env.DEV) {
+        console.log(`[FIREBASE AUTH] Result for ${profilePath}: NOT_FOUND`);
+      }
       return { status: 'NOT_FOUND' };
     }
 
     const data = snap.data();
-    console.log(`[FIREBASE AUTH] Document exists at ${profilePath}, inspecting data:`, data);
+    if (import.meta.env.DEV) {
+      console.log(`[FIREBASE AUTH] Document exists at ${profilePath}, inspecting data:`, data);
+    }
 
     // Profile validation per Requirement 7:
     // If the profile document exists, require:
@@ -333,7 +339,11 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
 
     if (invalidReasons.length > 0) {
       const reason = `Profile at ${profilePath} is incomplete: ${invalidReasons.join(', ')}`;
-      console.warn(`[FIREBASE AUTH] Result for ${profilePath}: PROFILE_INVALID (${reason})`);
+      if (import.meta.env.DEV) {
+        console.warn(`[FIREBASE AUTH] Result for ${profilePath}: PROFILE_INVALID (${reason})`);
+      } else {
+        console.warn('[FIREBASE AUTH] Profile document is invalid');
+      }
       return {
         status: 'PROFILE_INVALID',
         reason
@@ -351,14 +361,16 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
       isActive: data.isActive
     } as UserProfile;
 
-    console.log(`[FIREBASE AUTH] Result for ${profilePath}: FOUND`, {
-      uid: validatedProfile.uid,
-      fullName: validatedProfile.fullName,
-      email: validatedProfile.email,
-      role: validatedProfile.role,
-      gymId: validatedProfile.gymId,
-      isActive: validatedProfile.isActive
-    });
+    if (import.meta.env.DEV) {
+      console.log(`[FIREBASE AUTH] Result for ${profilePath}: FOUND`, {
+        uid: validatedProfile.uid,
+        fullName: validatedProfile.fullName,
+        email: validatedProfile.email,
+        role: validatedProfile.role,
+        gymId: validatedProfile.gymId,
+        isActive: validatedProfile.isActive
+      });
+    }
 
     return {
       status: 'FOUND',
@@ -367,7 +379,11 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
   } catch (err: any) {
     const code = err?.code || 'unknown';
     const message = err?.message || String(err);
-    console.error(`[FIREBASE AUTH] Error reading ${profilePath}:`, { code, message, raw: err });
+    if (import.meta.env.DEV) {
+      console.error(`[FIREBASE AUTH] Error reading ${profilePath}:`, { code, message, raw: err });
+    } else {
+      console.error('[FIREBASE AUTH] Error reading profile');
+    }
 
     if (
       code === 'permission-denied' || 
@@ -375,7 +391,11 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
       message.includes('permission-denied') || 
       message.includes('Missing or insufficient permissions')
     ) {
-      console.error(`[FIREBASE AUTH] Result for ${profilePath}: PERMISSION_DENIED (code: ${code})`);
+      if (import.meta.env.DEV) {
+        console.error(`[FIREBASE AUTH] Result for ${profilePath}: PERMISSION_DENIED (code: ${code})`);
+      } else {
+        console.error('[FIREBASE AUTH] Result: PERMISSION_DENIED');
+      }
       return {
         status: 'PERMISSION_DENIED',
         code,
@@ -383,7 +403,11 @@ export const getUserProfile = async (uid: string): Promise<ProfileResolutionResu
       };
     }
 
-    console.error(`[FIREBASE AUTH] Result for ${profilePath}: FIRESTORE_ERROR (code: ${code})`);
+    if (import.meta.env.DEV) {
+      console.error(`[FIREBASE AUTH] Result for ${profilePath}: FIRESTORE_ERROR (code: ${code})`);
+    } else {
+      console.error('[FIREBASE AUTH] Result: FIRESTORE_ERROR');
+    }
     return {
       status: 'FIRESTORE_ERROR',
       code,
@@ -420,7 +444,11 @@ export const fetchUserProfileByEmail = async (email: string): Promise<UserProfil
     }
     return null;
   } catch (err) {
-    console.warn(`[FIREBASE AUTH] fetchUserProfileByEmail error for ${cleanEmail}:`, err);
+    if (import.meta.env.DEV) {
+      console.warn(`[FIREBASE AUTH] fetchUserProfileByEmail error for ${cleanEmail}:`, err);
+    } else {
+      console.warn('[FIREBASE AUTH] fetchUserProfileByEmail error');
+    }
     return null;
   }
 };
@@ -442,7 +470,9 @@ export const lookupPreRegisteredProfile = async (
   const cleanEmail = normalizeEmail(email);
   if (!cleanEmail) return { status: 'NOT_FOUND' };
 
-  console.log(`[FIREBASE AUTH] Looking up pre-registration link for normalized email: ${cleanEmail}`);
+  if (import.meta.env.DEV) {
+    console.log(`[FIREBASE AUTH] Looking up pre-registration link for normalized email: ${cleanEmail}`);
+  }
 
   try {
     const emailHash = await hashEmail(cleanEmail);
@@ -450,7 +480,9 @@ export const lookupPreRegisteredProfile = async (
     const linkSnap = await getDoc(linkRef);
 
     if (!linkSnap.exists()) {
-      console.log(`[FIREBASE AUTH] No pre-registration link found at ${PRE_REGISTRATION_LINKS_COLLECTION}/${emailHash}`);
+      if (import.meta.env.DEV) {
+        console.log(`[FIREBASE AUTH] No pre-registration link found at ${PRE_REGISTRATION_LINKS_COLLECTION}/${emailHash}`);
+      }
 
       // Fallback only for local development/in-memory profiles
       if (fallbackProfiles && fallbackProfiles.length > 0) {
@@ -479,7 +511,11 @@ export const lookupPreRegisteredProfile = async (
 
     // 1. Validate link document fields
     if (linkData.emailNormalized !== cleanEmail) {
-      console.warn(`[FIREBASE AUTH] Pre-registration link email mismatch: stored=${linkData.emailNormalized}, query=${cleanEmail}`);
+      if (import.meta.env.DEV) {
+        console.warn(`[FIREBASE AUTH] Pre-registration link email mismatch: stored=${linkData.emailNormalized}, query=${cleanEmail}`);
+      } else {
+        console.warn('[FIREBASE AUTH] Pre-registration link email mismatch');
+      }
       return { status: 'INVALID', reason: 'Pre-registration link email mismatch.' };
     }
 
@@ -502,7 +538,11 @@ export const lookupPreRegisteredProfile = async (
 
     // 2. Already linked check (Requirement 5)
     if (linkData.authLinked === true && linkData.authUid && linkData.authUid !== currentAuthUid) {
-      console.warn(`[FIREBASE AUTH] Pre-registration for ${cleanEmail} is already linked to another UID: ${linkData.authUid}`);
+      if (import.meta.env.DEV) {
+        console.warn(`[FIREBASE AUTH] Pre-registration for ${cleanEmail} is already linked to another UID: ${linkData.authUid}`);
+      } else {
+        console.warn('[FIREBASE AUTH] Pre-registration is already linked to another account');
+      }
       return { status: 'ALREADY_LINKED', linkedUid: linkData.authUid };
     }
 
@@ -530,7 +570,11 @@ export const lookupPreRegisteredProfile = async (
     const profileSnap = await getDoc(profileRef);
 
     if (!profileSnap.exists()) {
-      console.warn(`[FIREBASE AUTH] Profile doc ${linkData.profileDocId} referenced by link does not exist.`);
+      if (import.meta.env.DEV) {
+        console.warn(`[FIREBASE AUTH] Profile doc ${linkData.profileDocId} referenced by link does not exist.`);
+      } else {
+        console.warn('[FIREBASE AUTH] Profile document referenced by link does not exist');
+      }
       return { status: 'NOT_FOUND' };
     }
 
@@ -577,7 +621,11 @@ export const lookupPreRegisteredProfile = async (
   } catch (err: any) {
     const code = err?.code || 'unknown';
     const message = err?.message || String(err);
-    console.error(`[FIREBASE AUTH] Error in lookupPreRegisteredProfile for ${cleanEmail}:`, { code, message });
+    if (import.meta.env.DEV) {
+      console.error(`[FIREBASE AUTH] Error in lookupPreRegisteredProfile for ${cleanEmail}:`, { code, message });
+    } else {
+      console.error('[FIREBASE AUTH] Error in lookupPreRegisteredProfile');
+    }
 
     if (
       code === 'permission-denied' ||
@@ -686,7 +734,9 @@ export const linkPreRegisteredProfile = async (
     });
   });
 
-  console.log(`[FIREBASE AUTH] Successfully bound pre-registration ${profileDocId} to auth UID ${authUser.uid} via atomic transaction`);
+  if (import.meta.env.DEV) {
+    console.log(`[FIREBASE AUTH] Successfully bound pre-registration ${profileDocId} to auth UID ${authUser.uid} via atomic transaction`);
+  }
   return canonicalProfile!;
 };
 
