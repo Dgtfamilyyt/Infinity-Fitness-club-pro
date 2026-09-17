@@ -241,16 +241,6 @@ export const INITIAL_STAFF: UserProfile[] = [
     fitnessGoal: 'Front Desk Lead & Member Experience Coordinator'
   },
   {
-    id: 'owner-infinity',
-    email: 'owner@infinityfitnessclub.in',
-    fullName: 'Karan Singhania',
-    phone: '+91 98112 00555',
-    role: 'owner',
-    isActive: true,
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    fitnessGoal: 'Club Founder & Managing Director'
-  },
-  {
     id: 'owner-dgtfamily',
     email: 'dgtfamilyyt8@gmail.com',
     fullName: 'Karan Singhania (Club Owner)',

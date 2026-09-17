@@ -17,14 +17,9 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email != null ? request.auth.token.email : '';
     }
 
-    // Emergency owner accounts strictly to prevent owner lockout during migration
+    // Emergency owner account strictly for initial bootstrap/migration safety
     function isEmergencyOwnerEmail() {
-      return signedIn() && (
-        myEmail() in [
-          'owner@infinityfitnessclub.in',
-          'dgtfamilyyt8@gmail.com'
-        ]
-      );
+      return signedIn() && myEmail() == 'dgtfamilyyt8@gmail.com';
     }
 
     function hasProfile() {
@@ -44,10 +39,7 @@ service cloud.firestore {
     }
 
     function isStaff() {
-      return signedIn() && (
-        isEmergencyOwnerEmail() ||
-        (isAccountActive() && (myRole() in ['trainer', 'admin', 'owner']))
-      );
+      return signedIn() && isAccountActive() && (myRole() in ['trainer', 'admin', 'owner']);
     }
 
     function isTrainer() {
@@ -55,28 +47,19 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && (
-        isEmergencyOwnerEmail() ||
-        (isAccountActive() && myRole() == 'admin')
-      );
+      return signedIn() && isAccountActive() && myRole() == 'admin';
     }
 
     function isOwner() {
-      return signedIn() && (
-        isEmergencyOwnerEmail() ||
-        (isAccountActive() && myRole() == 'owner')
-      );
+      return signedIn() && isAccountActive() && myRole() == 'owner';
     }
 
     function isAdminOrOwner() {
-      return signedIn() && (
-        isEmergencyOwnerEmail() ||
-        (isAccountActive() && (myRole() in ['admin', 'owner']))
-      );
+      return signedIn() && isAccountActive() && (myRole() in ['admin', 'owner']);
     }
 
-    // Allows initial database setup before gyms/infinity-neelambur is provisioned
-    // STRICTLY restricted to emergency owner to prevent arbitrary or anonymous write access
+    // Dedicated bootstrap helper for emergency owner to perform initial provisioning only
+    // Requires BOTH gym document missing AND verified emergency owner email
     function isBootstrap() {
       return !exists(/databases/$(database)/documents/gyms/infinity-neelambur) && isEmergencyOwnerEmail();
     }
@@ -91,7 +74,7 @@ service cloud.firestore {
     // ==========================================
     match /gyms/{gymId} {
       allow read: if true;
-      allow write: if isAdminOrOwner();
+      allow write: if isAdminOrOwner() || (isBootstrap() && gymId == 'infinity-neelambur');
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'whatsapp', 'altPhone', 'updatedAt']);
     }
 
@@ -117,13 +100,25 @@ service cloud.firestore {
     match /profiles/{userId} {
       // Direct self-read for authenticated user: strictly allows reading own document
       // Evaluated first so self-read never fails on missing doc or staff recursion
+      // Profiles are private: public and non-staff reads are blocked
       allow read: if (request.auth != null && request.auth.uid == userId)
-                  || isStaff()
-                  || (resource != null && resource.data.role == 'trainer');
+                  || isStaff();
 
       allow create: if signedIn() && (
         isAdminOrOwner() || 
         isStaff() || 
+        // Initial emergency bootstrap: allows emergency owner to provision initial owner profile only when gym is unseeded
+        (
+          isBootstrap() &&
+          myUid() == userId &&
+          request.resource.data.role == 'owner' &&
+          request.resource.data.gymId == 'infinity-neelambur' &&
+          request.resource.data.isActive == true &&
+          request.resource.data.authUid == request.auth.uid &&
+          request.resource.data.authLinked == true &&
+          request.auth.token.email != null &&
+          request.resource.data.email == request.auth.token.email
+        ) ||
         // Strict temporary safe client-side member profile creation (Requirements 1, 2, 3)
         (
           myUid() == userId &&
